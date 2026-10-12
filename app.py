@@ -5,7 +5,17 @@ import numpy as np
 import joblib
 from pathlib import Path
 
-# --- 1. DEFINE & REGISTER WRAPPER IN __main__ (FIXES ATTRIBUTEERROR) ---
+# ================================================================
+# 1. COMPATIBILITY BRIDGES (MUST RUN BEFORE JOBLIB.LOAD)
+# ================================================================
+# A. Fix for scikit-learn _RemainderColsList across versions
+import sklearn.compose._column_transformer
+if not hasattr(sklearn.compose._column_transformer, "_RemainderColsList"):
+    class _RemainderColsList(list):
+        pass
+    sklearn.compose._column_transformer._RemainderColsList = _RemainderColsList
+
+# B. Fix for CatBoost wrapper if loading ensemble bundle
 from sklearn.base import BaseEstimator, RegressorMixin
 try:
     from catboost import CatBoostRegressor
@@ -15,24 +25,16 @@ except ImportError:
 class CatBoostSklearnWrapper(RegressorMixin, BaseEstimator):
     def __init__(self, params=None):
         self.params = params
-
     def fit(self, X, y):
-        if CatBoostRegressor is None:
-            raise ImportError("catboost is not installed.")
-        parameters = {} if self.params is None else dict(self.params)
-        self.model_ = CatBoostRegressor(**parameters)
-        self.model_.fit(X, y)
-        if hasattr(X, "shape") and len(X.shape) == 2:
-            self.n_features_in_ = X.shape[1]
         return self
-
     def predict(self, X):
         return self.model_.predict(X)
 
-# Explicitly register into sys.modules['__main__'] so pickle always finds it
 sys.modules["__main__"].CatBoostSklearnWrapper = CatBoostSklearnWrapper
 
-# --- 2. STREAMLIT PAGE SETUP & STYLING ---
+# ================================================================
+# 2. STREAMLIT PAGE CONFIGURATION & STYLING
+# ================================================================
 st.set_page_config(
     page_title="Bio-Concrete Compressive Strength AI",
     page_icon="🏗️",
@@ -59,7 +61,9 @@ st.markdown("""
 st.title("🏗️ Bio-Concrete Compressive Strength Predictor")
 st.caption("Optuna-Tuned Machine Learning Engine (v29** Architecture)")
 
-# --- 3. LOAD MODEL BUNDLE ---
+# ================================================================
+# 3. LOAD MODEL BUNDLE
+# ================================================================
 @st.cache_resource
 def load_bundle():
     possible_paths = [
@@ -68,15 +72,29 @@ def load_bundle():
         Path("models/Optuna_Collective21_Ensemble_v29starstar.joblib"),
         Path("Optuna_Collective21_Ensemble_v29starstar.joblib"),
     ]
+    target_path = None
     for p in possible_paths:
         if p.exists():
-            return joblib.load(p)
-    st.error("No model .joblib file found in repository. Please ensure it is uploaded.")
-    return None
+            target_path = p
+            break
+
+    if target_path is None:
+        st.error("No model .joblib file found in the repository or models/ folder.")
+        return None
+
+    try:
+        return joblib.load(target_path)
+    except Exception as e:
+        st.error(f"❌ Failed to load model: {repr(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        return None
 
 bundle = load_bundle()
 
-# --- 4. EXACT v29** FEATURE RATIOS & TRANSFORMATIONS ---
+# ================================================================
+# 4. EXACT v29** FEATURE RATIOS & TRANSFORMATIONS
+# ================================================================
 def safe_divide(n, d):
     d = pd.to_numeric(d, errors="coerce")
     return n / d.where(np.abs(d) > 1e-12, np.nan)
@@ -157,7 +175,9 @@ def predict_from_bundle(bundle, df_raw_inputs):
         strat = bundle.get("selected_strategy", bundle["model_order"][0])
         return float(bundle["models"][strat].predict(df_model)[0])
 
-# --- 5. UI CONTROLS WITH DATASET BOUNDS ---
+# ================================================================
+# 5. USER CONTROLS WITH DATASET BOUNDS
+# ================================================================
 col_left, col_right = st.columns([2, 1], gap="large")
 
 with col_left:
@@ -212,7 +232,9 @@ with col_left:
     with c_extra2:
         applied_load = st.number_input("Pre-Damage Load (MPa)", min_value=0.0, max_value=60.3, value=0.0, step=1.0)
 
-# --- 6. REAL-TIME PREDICTION DISPLAY ---
+# ================================================================
+# 6. REAL-TIME PREDICTION DISPLAY
+# ================================================================
 with col_right:
     st.subheader("Predicted Strength Output")
     st.button("Update Prediction", type="primary", use_container_width=True)
