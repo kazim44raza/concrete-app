@@ -6,16 +6,41 @@ import joblib
 from pathlib import Path
 
 # ================================================================
-# 1. COMPATIBILITY BRIDGES (MUST RUN BEFORE JOBLIB.LOAD)
+# 1. CROSS-VERSION SCIKIT-LEARN COMPATIBILITY BRIDGES
 # ================================================================
-# A. Fix for scikit-learn _RemainderColsList across versions
+
+# A. Fix for ColumnTransformer _RemainderColsList across versions
 import sklearn.compose._column_transformer
 if not hasattr(sklearn.compose._column_transformer, "_RemainderColsList"):
     class _RemainderColsList(list):
         pass
     sklearn.compose._column_transformer._RemainderColsList = _RemainderColsList
 
-# B. Fix for CatBoost wrapper if loading ensemble bundle
+# B. Fix for SimpleImputer _fill_dtype across versions
+from sklearn.impute import SimpleImputer
+_orig_imputer_transform = SimpleImputer.transform
+def _patched_imputer_transform(self, X):
+    if not hasattr(self, "_fill_dtype"):
+        if hasattr(self, "statistics_") and hasattr(self.statistics_, "dtype"):
+            self._fill_dtype = self.statistics_.dtype
+        else:
+            self._fill_dtype = object
+    return _orig_imputer_transform(self, X)
+SimpleImputer.transform = _patched_imputer_transform
+
+# C. Fix for OneHotEncoder _infrequent_enabled across versions
+from sklearn.preprocessing import OneHotEncoder
+_orig_ohe_transform = OneHotEncoder.transform
+def _patched_ohe_transform(self, X):
+    if not hasattr(self, "_infrequent_enabled"):
+        self._infrequent_enabled = (
+            getattr(self, "min_frequency", None) is not None
+            or getattr(self, "max_categories", None) is not None
+        )
+    return _orig_ohe_transform(self, X)
+OneHotEncoder.transform = _patched_ohe_transform
+
+# D. Fix for CatBoost wrapper if loading ensemble bundle
 from sklearn.base import BaseEstimator, RegressorMixin
 try:
     from catboost import CatBoostRegressor
@@ -237,7 +262,7 @@ with col_left:
 # ================================================================
 with col_right:
     st.subheader("Predicted Strength Output")
-    st.button("Update Prediction", type="primary", use_container_width=True)
+    update_btn = st.button("Update Prediction", type="primary", use_container_width=True)
 
     if bundle is not None:
         input_row = pd.DataFrame([{
@@ -264,19 +289,24 @@ with col_right:
             "Curing Environment": str(curing_env),
         }])
 
-        pred_val = predict_from_bundle(bundle, input_row)
+        try:
+            pred_val = predict_from_bundle(bundle, input_row)
 
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Predicted Compressive Strength</div>
-            <div class="kpi-value">{pred_val:.2f}</div>
-            <div class="kpi-unit">MPa</div>
-        </div>
-        """, unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-title">Predicted Compressive Strength</div>
+                <div class="kpi-value">{pred_val:.2f}</div>
+                <div class="kpi-unit">MPa</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.markdown("### Mix Physical Metrics")
-        total_b = cement + silica_fumes + fly_ash
-        st.write(f"• **Water/Binder Ratio:** `{water / total_b:.3f}`")
-        st.write(f"• **Total Binder:** `{total_b:.1f} kg/m³`")
-        st.write(f"• **Aggregate/Binder Ratio:** `{(coarse_agg + sand) / total_b:.2f}`")
+            st.markdown("---")
+            st.markdown("### Mix Physical Metrics")
+            total_b = cement + silica_fumes + fly_ash
+            st.write(f"• **Water/Binder Ratio:** `{water / total_b:.3f}`")
+            st.write(f"• **Total Binder:** `{total_b:.1f} kg/m³`")
+            st.write(f"• **Aggregate/Binder Ratio:** `{(coarse_agg + sand) / total_b:.2f}`")
+        except Exception as pred_err:
+            st.error(f"Prediction calculation error: {repr(pred_err)}")
+            import traceback
+            st.code(traceback.format_exc())
