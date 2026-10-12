@@ -1,10 +1,38 @@
+import sys
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
 from pathlib import Path
 
-# --- 1. PAGE SETUP & MODERN DARK STYLING ---
+# --- 1. DEFINE & REGISTER WRAPPER IN __main__ (FIXES ATTRIBUTEERROR) ---
+from sklearn.base import BaseEstimator, RegressorMixin
+try:
+    from catboost import CatBoostRegressor
+except ImportError:
+    CatBoostRegressor = None
+
+class CatBoostSklearnWrapper(RegressorMixin, BaseEstimator):
+    def __init__(self, params=None):
+        self.params = params
+
+    def fit(self, X, y):
+        if CatBoostRegressor is None:
+            raise ImportError("catboost is not installed.")
+        parameters = {} if self.params is None else dict(self.params)
+        self.model_ = CatBoostRegressor(**parameters)
+        self.model_.fit(X, y)
+        if hasattr(X, "shape") and len(X.shape) == 2:
+            self.n_features_in_ = X.shape[1]
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(X)
+
+# Explicitly register into sys.modules['__main__'] so pickle always finds it
+sys.modules["__main__"].CatBoostSklearnWrapper = CatBoostSklearnWrapper
+
+# --- 2. STREAMLIT PAGE SETUP & STYLING ---
 st.set_page_config(
     page_title="Bio-Concrete Compressive Strength AI",
     page_icon="🏗️",
@@ -29,26 +57,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🏗️ Bio-Concrete Compressive Strength Predictor")
-st.caption("Engineered using Optuna-Tuned Extreme Gradient Boosting (XGBoost)")
+st.caption("Optuna-Tuned Machine Learning Engine (v29** Architecture)")
 
-# --- 2. LOAD TRAINED MODEL ---
+# --- 3. LOAD MODEL BUNDLE ---
 @st.cache_resource
 def load_bundle():
-    paths = [
+    possible_paths = [
         Path("models/XGBoost_Optuna_Collective21.joblib"),
         Path("XGBoost_Optuna_Collective21.joblib"),
         Path("models/Optuna_Collective21_Ensemble_v29starstar.joblib"),
-        Path("Optuna_Collective21_Ensemble_v29starstar.joblib")
+        Path("Optuna_Collective21_Ensemble_v29starstar.joblib"),
     ]
-    for p in paths:
+    for p in possible_paths:
         if p.exists():
             return joblib.load(p)
-    st.error("Model .joblib file not found in models/ folder.")
+    st.error("No model .joblib file found in repository. Please ensure it is uploaded.")
     return None
 
 bundle = load_bundle()
 
-# --- 3. EXACT DOMAIN FEATURE RATIOS ---
+# --- 4. EXACT v29** FEATURE RATIOS & TRANSFORMATIONS ---
 def safe_divide(n, d):
     d = pd.to_numeric(d, errors="coerce")
     return n / d.where(np.abs(d) > 1e-12, np.nan)
@@ -104,7 +132,32 @@ def add_domain_features(frame):
 
     return frame
 
-# --- 4. INPUT INTERFACE WITH DATASET BOUNDS ---
+def predict_from_bundle(bundle, df_raw_inputs):
+    df_eng = add_domain_features(df_raw_inputs)
+    schema = bundle["feature_schema"]
+    df_prep = df_eng[list(schema.keys())].copy()
+    for col, role in schema.items():
+        if role == "numeric":
+            df_prep[col] = pd.to_numeric(df_prep[col], errors="coerce")
+        else:
+            df_prep[col] = df_prep[col].astype(str)
+
+    df_prep = df_prep.drop(columns=bundle.get("dropped_unusable_columns", []), errors="ignore")
+    df_model = df_prep[bundle["model_input_columns"]]
+
+    if bundle.get("selected_strategy") == "ensemble":
+        preds = np.column_stack([
+            bundle["models"][name].predict(df_model) for name in bundle["model_order"]
+        ])
+        weights = np.array([bundle["weights"][name] for name in bundle["model_order"]])
+        return float(preds @ weights)
+    elif "pipeline" in bundle:
+        return float(bundle["pipeline"].predict(df_model)[0])
+    else:
+        strat = bundle.get("selected_strategy", bundle["model_order"][0])
+        return float(bundle["models"][strat].predict(df_model)[0])
+
+# --- 5. UI CONTROLS WITH DATASET BOUNDS ---
 col_left, col_right = st.columns([2, 1], gap="large")
 
 with col_left:
@@ -159,7 +212,7 @@ with col_left:
     with c_extra2:
         applied_load = st.number_input("Pre-Damage Load (MPa)", min_value=0.0, max_value=60.3, value=0.0, step=1.0)
 
-# --- 5. REAL-TIME PREDICTION DISPLAY ---
+# --- 6. REAL-TIME PREDICTION DISPLAY ---
 with col_right:
     st.subheader("Predicted Strength Output")
     st.button("Update Prediction", type="primary", use_container_width=True)
@@ -189,21 +242,7 @@ with col_right:
             "Curing Environment": str(curing_env),
         }])
 
-        df_eng = add_domain_features(input_row)
-        schema = bundle["feature_schema"]
-        df_prep = df_eng[list(schema.keys())].copy()
-        for col, role in schema.items():
-            if role == "numeric":
-                df_prep[col] = pd.to_numeric(df_prep[col], errors="coerce")
-            else:
-                df_prep[col] = df_prep[col].astype(str)
-
-        df_prep = df_prep.drop(columns=bundle.get("dropped_unusable_columns", []), errors="ignore")
-        df_model = df_prep[bundle["model_input_columns"]]
-
-        # Predict using the saved pipeline
-        model_obj = bundle["models"]["XGB"] if "models" in bundle else bundle["pipeline"]
-        pred_val = float(model_obj.predict(df_model)[0])
+        pred_val = predict_from_bundle(bundle, input_row)
 
         st.markdown(f"""
         <div class="kpi-card">
