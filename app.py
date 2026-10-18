@@ -1,435 +1,572 @@
+```python
+"""
+Self-Healing Concrete Compressive Strength Prediction Dashboard
+===============================================================
+Model Bundle: Optuna_Collective21_Ensemble_v29starstar.joblib
+Target Range: 9.06 MPa – 115.13 MPa | Validation R² = 0.9283 | RMSE = 4.136 MPa
+
+Single-page, 4-step vertical engineering workflow:
+  Step 1: Input Data (4 Visual Sections: Base Mix, Self-Healing Agents,
+          Environmental & Testing, and "Get Suggested Mix Proportion" Action)
+  Step 2: Suggested Mix Proportion Window (Side-by-side comparison & mix selector)
+  Step 3: Prediction Output (Plotly Gauge Chart + Structural Grade Diagnostics)
+  Step 4: Interpretability & Validation Plots (21-Feature SHAP Waterfall & Parity Plot)
+"""
+
+from __future__ import annotations
+
+import os
+import re
 import sys
-import streamlit as st
-import pandas as pd
-import numpy as np
-import joblib
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-# ================================================================
-# 1. CROSS-VERSION SCIKIT-LEARN COMPATIBILITY BRIDGES
-# ================================================================
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
-# A. Fix for ColumnTransformer _RemainderColsList across versions
-import sklearn.compose._column_transformer
-if not hasattr(sklearn.compose._column_transformer, "_RemainderColsList"):
-    class _RemainderColsList(list):
-        pass
-    sklearn.compose._column_transformer._RemainderColsList = _RemainderColsList
-
-# B. Fix for SimpleImputer _fill_dtype across versions
-from sklearn.impute import SimpleImputer
-_orig_imputer_transform = SimpleImputer.transform
-def _patched_imputer_transform(self, X):
-    if not hasattr(self, "_fill_dtype"):
-        if hasattr(self, "statistics_") and hasattr(self.statistics_, "dtype"):
-            self._fill_dtype = self.statistics_.dtype
-        else:
-            self._fill_dtype = object
-    return _orig_imputer_transform(self, X)
-SimpleImputer.transform = _patched_imputer_transform
-
-# C. Fix for OneHotEncoder _infrequent_enabled across versions
-from sklearn.preprocessing import OneHotEncoder
-_orig_ohe_transform = OneHotEncoder.transform
-def _patched_ohe_transform(self, X):
-    if not hasattr(self, "_infrequent_enabled"):
-        self._infrequent_enabled = (
-            getattr(self, "min_frequency", None) is not None
-            or getattr(self, "max_categories", None) is not None
-        )
-    return _orig_ohe_transform(self, X)
-OneHotEncoder.transform = _patched_ohe_transform
-
-# D. Fix for CatBoost wrapper if loading ensemble bundle
-from sklearn.base import BaseEstimator, RegressorMixin
 try:
-    from catboost import CatBoostRegressor
-except ImportError:
-    CatBoostRegressor = None
+    import joblib
+except ImportError:  # pragma: no cover
+    joblib = None  # type: ignore
 
-class CatBoostSklearnWrapper(RegressorMixin, BaseEstimator):
-    def __init__(self, params=None):
-        self.params = params
-    def fit(self, X, y):
-        return self
-    def predict(self, X):
-        return self.model_.predict(X)
+try:
+    import plotly.graph_objects as go
+except ImportError:  # pragma: no cover
+    go = None  # type: ignore
 
-sys.modules["__main__"].CatBoostSklearnWrapper = CatBoostSklearnWrapper
+try:
+    import shap
+except ImportError:  # pragma: no cover
+    shap = None  # type: ignore
 
-# ================================================================
-# 2. STREAMLIT PAGE CONFIGURATION & STYLING
-# ================================================================
-st.set_page_config(
-    page_title="AI-Based Prediction of Self-Healing Concrete Compressive Strength",
-    page_icon="🏗️",
-    layout="wide",
-)
+try:
+    import streamlit as st
+except ImportError:  # pragma: no cover
+    st = None  # type: ignore
 
-st.markdown("""
-<style>
-    .kpi-card {
-        background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
-        border: 2px solid #00D2FF;
-        border-radius: 14px;
-        padding: 24px;
-        text-align: center;
-        box-shadow: 0 10px 25px rgba(0, 210, 255, 0.18);
-        margin-top: 12px;
-        margin-bottom: 16px;
-    }
-    .kpi-title {
-        font-size: 14px;
-        color: #94A3B8;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1.2px;
-    }
-    .kpi-value {
-        font-size: 52px;
-        color: #00D2FF;
-        font-weight: 800;
-        margin: 8px 0;
-    }
-    .kpi-unit {
-        font-size: 18px;
-        color: #E2E8F0;
-        font-weight: 600;
-    }
-    .metric-row {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        margin-top: 12px;
-    }
-    .metric-badge {
-        flex: 1;
-        background: #162032;
-        border: 1px solid #334155;
-        border-radius: 10px;
-        padding: 12px;
-        text-align: center;
-    }
-    .metric-badge-label {
-        font-size: 12px;
-        color: #94A3B8;
-        text-transform: uppercase;
-        font-weight: 600;
-    }
-    .metric-badge-val {
-        font-size: 20px;
-        color: #38BDF8;
-        font-weight: 700;
-        margin-top: 4px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
-st.title("🏗️ AI-Based Prediction of Self-Healing Concrete Compressive Strength")
-st.caption("Optuna-Tuned Machine Learning Engine (v29** Collective-21 Architecture)")
+# =============================================================================
+# 1. CONSTANTS, STRICT BOUNDS & 30-COLUMN / 21-FEATURE SCHEMA DEFINITIONS
+# =============================================================================
 
-# ================================================================
-# 3. LOAD MODEL BUNDLE & EXTRACT METRICS
-# ================================================================
-@st.cache_resource
-def load_bundle():
-    possible_paths = [
-        Path("models/XGBoost_Optuna_Collective21.joblib"),
-        Path("XGBoost_Optuna_Collective21.joblib"),
-        Path("models/Optuna_Collective21_Ensemble_v29starstar.joblib"),
-        Path("Optuna_Collective21_Ensemble_v29starstar.joblib"),
-    ]
-    target_path = None
-    for p in possible_paths:
-        if p.exists():
-            target_path = p
+MODEL_BUNDLE_FILENAME = "Optuna_Collective21_Ensemble_v29starstar.joblib"
+REGRESSION_PLOT_FILENAME = "Optuna_v29starstar_Independent_Test_Regression.png"
+
+DATASET_MIN_MPA = 9.06
+DATASET_MAX_MPA = 115.13
+MODEL_R2 = 0.9283
+MODEL_RMSE = 4.136
+
+# Strict bounds for Section 1: Base Mix Design (Continuous Inputs)
+BASE_MIX_SPECS: Dict[str, Dict[str, Any]] = {
+    "Cement(kg/m3)": {
+        "label": "Cement",
+        "unit": "kg/m³",
+        "min": 171.6,
+        "max": 650.0,
+        "default": 400.0,
+        "step": 5.0,
+        "help": "Ordinary Portland Cement content (171.6 – 650.0 kg/m³)",
+    },
+    "WATER(kg/m3)": {
+        "label": "Mixing Water",
+        "unit": "kg/m³",
+        "min": 122.5,
+        "max": 300.0,
+        "default": 200.0,
+        "step": 2.5,
+        "help": "Net mixing water content (122.5 – 300.0 kg/m³)",
+    },
+    "CA(kg/m3)": {
+        "label": "Coarse Aggregate (CA)",
+        "unit": "kg/m³",
+        "min": 0.0,
+        "max": 1477.74,
+        "default": 800.0,
+        "step": 10.0,
+        "help": "Crushed stone / gravel coarse aggregate (0.0 – 1477.74 kg/m³)",
+    },
+    "FA (kg/m3)SAND": {
+        "label": "Fine Aggregate (FA / Sand)",
+        "unit": "kg/m³",
+        "min": 350.0,
+        "max": 1500.0,
+        "default": 700.0,
+        "step": 10.0,
+        "help": "Natural river or manufactured sand (350.0 – 1500.0 kg/m³)",
+    },
+    "SuperPlasticizer(kg/m3)": {
+        "label": "Superplasticizer (HRWR)",
+        "unit": "kg/m³",
+        "min": 0.0,
+        "max": 15.675,
+        "default": 0.0,
+        "step": 0.25,
+        "help": "High-range water reducer dosage (0.0 – 15.675 kg/m³)",
+    },
+    "Silica Fumes(kg/m3)": {
+        "label": "Silica Fume",
+        "unit": "kg/m³",
+        "min": 0.0,
+        "max": 50.0,
+        "default": 0.0,
+        "step": 1.0,
+        "help": "Micro-silica supplementary pozzolan (0.0 – 50.0 kg/m³)",
+    },
+    "Fly Ash(kg/m3)": {
+        "label": "Fly Ash",
+        "unit": "kg/m³",
+        "min": 0.0,
+        "max": 350.0,
+        "default": 0.0,
+        "step": 5.0,
+        "help": "Pulverized fuel ash binder addition (0.0 – 350.0 kg/m³)",
+    },
+    "T(°C) OF CUBE": {
+        "label": "Cube Temperature T(°C)",
+        "unit": "°C",
+        "min": 22.0,
+        "max": 200.0,
+        "default": 25.0,
+        "step": 1.0,
+        "help": "Thermal conditioning temperature of specimen (22.0 – 200.0 °C)",
+    },
+}
+
+# Section 2: Self-Healing Agents mappings
+FIBER_TYPE_MAP: Dict[str, Optional[str]] = {
+    "None": None,
+    "Steel Fiber": "STEEL FIBER(kg/m3)",
+    "Glass Fiber": "GLASS FIBER(kg/m3)",
+    "Basalt Fiber": "BASALT FIBER(kg/m3)",
+    "PVA Fiber": "PVA FIBER(kg/m3)",
+}
+
+BACTERIA_TYPE_MAP: Dict[str, Optional[str]] = {
+    "None": None,
+    "Bacillus Subtilis": "BACILLUS SUBTILIS(kg/m3)",
+    "Rhizobium Leguminosarum": "RHIZOBIUM LEGUMINOSARUM(kg/m3)",
+    "Bacillus Sphaericus": "BACILLUS SPHAERICUS(kg/m3)",
+    "Bacillus Megaterium": "BACILLUS MEGATERIUM(kg/m3)",
+}
+
+NUTRIENT_TYPE_MAP: Dict[str, Optional[str]] = {
+    "None": None,
+    "Calcium Lactate": "CALCIUM LACTATE(kg/m3)",
+    "Calcium Lactate Pentahydrate": "CALCIUM LACTATE PENTAHYDRATE(kg/m3)",
+    "Calcium Nitrate": "CALCIUM NITRATE(kg/m3)",
+}
+
+DELIVERY_SYSTEM_MAP: Dict[str, Optional[str]] = {
+    "None": None,
+    "Bacteria Only": None,  # Forces both microcapsule columns to 0.0
+    "Sodium Silicate Microcapsule": "SODIUM SILICATE MICROCAPSULE(kg/m3)",
+    "Cement Microcapsule": "CEMENT MICROCAPSULE(kg/m3)",
+}
+
+# Section 3: Environmental & Testing mappings
+CURING_ENV_MAP: Dict[str, str] = {
+    "Fresh Water Curing": "FRESH WATER CURING",
+    "Sulfate Water Curing": "SULFATE WATER CURING",
+    "Humidity Air Curing": "HUMIDITY AIR CURING",
+    "Dry Air Curing": "DRY AIR CURING",
+    "Sea Water Curing": "SEA WATER CURING",
+}
+
+# Exact 30 Raw Columns in canonical order
+RAW_30_COLUMNS: List[str] = [
+    # Section 1: Base Mix Design (8)
+    "Cement(kg/m3)",
+    "WATER(kg/m3)",
+    "CA(kg/m3)",
+    "FA (kg/m3)SAND",
+    "SuperPlasticizer(kg/m3)",
+    "Silica Fumes(kg/m3)",
+    "Fly Ash(kg/m3)",
+    "T(°C) OF CUBE",
+    # Section 2: Self-Healing Agents (14)
+    "STEEL FIBER(kg/m3)",
+    "GLASS FIBER(kg/m3)",
+    "BASALT FIBER(kg/m3)",
+    "PVA FIBER(kg/m3)",
+    "BACILLUS SUBTILIS(kg/m3)",
+    "RHIZOBIUM LEGUMINOSARUM(kg/m3)",
+    "BACILLUS SPHAERICUS(kg/m3)",
+    "BACILLUS MEGATERIUM(kg/m3)",
+    "Bacteria(cell/ml)",
+    "CALCIUM LACTATE(kg/m3)",
+    "CALCIUM LACTATE PENTAHYDRATE(kg/m3)",
+    "CALCIUM NITRATE(kg/m3)",
+    "SODIUM SILICATE MICROCAPSULE(kg/m3)",
+    "CEMENT MICROCAPSULE(kg/m3)",
+    # Section 3: Environmental & Testing (8)
+    "FRESH WATER CURING",
+    "SULFATE WATER CURING",
+    "HUMIDITY AIR CURING",
+    "DRY AIR CURING",
+    "SEA WATER CURING",
+    "Curing Days",
+    "Healing Period Days",
+    "APPLIED LOAD FOR HEALING(MPa)",
+]
+
+# Exact 21 Collective Features represented by the model architecture
+COLLECTIVE_21_FEATURES: List[str] = [
+    "Cement(kg/m3)",
+    "WATER(kg/m3)",
+    "CA(kg/m3)",
+    "FA (kg/m3)SAND",
+    "SuperPlasticizer(kg/m3)",
+    "Silica Fumes(kg/m3)",
+    "Fly Ash(kg/m3)",
+    "T(°C) OF CUBE",
+    "Fiber Type",
+    "Fiber Dosage (kg/m3)",
+    "Bacteria Type",
+    "Bacteria Dosage (kg/m3)",
+    "Bacteria(cell/ml)",
+    "Nutrient Type",
+    "Nutrient Dosage (kg/m3)",
+    "Delivery System",
+    "Delivery Dosage (kg/m3)",
+    "Curing Environment",
+    "Curing Days",
+    "Healing Period Days",
+    "APPLIED LOAD FOR HEALING(MPa)",
+]
+
+
+# =============================================================================
+# 2. REQUIRED VERBATIM PREDICTION UTILITIES & SCHEMA MAPPING LOGIC
+# =============================================================================
+
+def normalized_name(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value).casefold())
+
+
+# Ensure normalized_name is always registered on __main__ for joblib unpickling
+sys.modules["__main__"].normalized_name = normalized_name
+
+
+def map_ui_inputs_to_raw_30_df(ui_inputs: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Maps the structured UI inputs from Sections 1, 2, and 3 into a single-row
+    pandas DataFrame with the exact 30 raw columns specified by the schema.
+    """
+    row: Dict[str, float] = {col: 0.0 for col in RAW_30_COLUMNS}
+
+    # Section 1: Base Mix Design (8 continuous inputs)
+    for col, spec in BASE_MIX_SPECS.items():
+        val = float(ui_inputs.get(col, spec["default"]))
+        row[col] = float(np.clip(val, spec["min"], spec["max"]))
+
+    # Section 2: Self-Healing Agents
+    # Feature 1: Fibers
+    fiber_type = str(ui_inputs.get("fiber_type", "None"))
+    fiber_dosage = float(np.clip(float(ui_inputs.get("fiber_dosage", 0.0)), 0.0, 117.0))
+    target_fiber_col = FIBER_TYPE_MAP.get(fiber_type)
+    if target_fiber_col is not None:
+        row[target_fiber_col] = fiber_dosage
+
+    # Feature 2: Bacteria
+    bacteria_type = str(ui_inputs.get("bacteria_type", "None"))
+    bacteria_dosage = float(
+        np.clip(float(ui_inputs.get("bacteria_dosage", 0.0)), 0.0, 26.7)
+    )
+    target_bacteria_col = BACTERIA_TYPE_MAP.get(bacteria_type)
+    if target_bacteria_col is not None:
+        row[target_bacteria_col] = bacteria_dosage
+
+    bacteria_conc = float(
+        np.clip(float(ui_inputs.get("bacteria_conc", 0.0)), 0.0, 2.8e9)
+    )
+    row["Bacteria(cell/ml)"] = bacteria_conc
+
+    # Feature 3: Nutrients
+    nutrient_type = str(ui_inputs.get("nutrient_type", "None"))
+    nutrient_dosage = float(
+        np.clip(float(ui_inputs.get("nutrient_dosage", 0.0)), 0.0, 44.323)
+    )
+    target_nutrient_col = NUTRIENT_TYPE_MAP.get(nutrient_type)
+    if target_nutrient_col is not None:
+        row[target_nutrient_col] = nutrient_dosage
+
+    # Feature 4: Delivery System
+    # Note: If "Bacteria Only" or "None" is selected, force delivery dosages to 0.
+    delivery_system = str(ui_inputs.get("delivery_system", "None"))
+    delivery_dosage = float(
+        np.clip(float(ui_inputs.get("delivery_dosage", 0.0)), 0.0, 12.25)
+    )
+    if delivery_system in ("None", "Bacteria Only"):
+        delivery_dosage = 0.0
+    target_delivery_col = DELIVERY_SYSTEM_MAP.get(delivery_system)
+    if target_delivery_col is not None:
+        row[target_delivery_col] = delivery_dosage
+
+    # Section 3: Environmental & Testing
+    curing_env = str(ui_inputs.get("curing_env", "Fresh Water Curing"))
+    target_curing_col = CURING_ENV_MAP.get(curing_env, "FRESH WATER CURING")
+    for env_col in CURING_ENV_MAP.values():
+        row[env_col] = 1.0 if env_col == target_curing_col else 0.0
+
+    row["Curing Days"] = float(
+        np.clip(float(ui_inputs.get("curing_days", 28.0)), 3.0, 180.0)
+    )
+    row["Healing Period Days"] = float(
+        np.clip(float(ui_inputs.get("healing_days", 0.0)), 0.0, 124.0)
+    )
+    row["APPLIED LOAD FOR HEALING(MPa)"] = float(
+        np.clip(float(ui_inputs.get("applied_load", 0.0)), 0.0, 60.3)
+    )
+
+    df = pd.DataFrame([row], columns=RAW_30_COLUMNS)
+    # Preserve categorical selection metadata for Collective-21 reconstruction
+    df.attrs["delivery_system"] = delivery_system
+    df.attrs["fiber_type"] = fiber_type
+    df.attrs["bacteria_type"] = bacteria_type
+    df.attrs["nutrient_type"] = nutrient_type
+    df.attrs["curing_env"] = curing_env
+    return df
+
+
+def derive_collective21_frame(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Derives the 21 collective features from the 30-column raw DataFrame.
+    Supports both categorical-string and numeric representations.
+    """
+    r = raw_df.iloc[0]
+
+    # 1. Fiber Type & Dosage
+    fiber_type = raw_df.attrs.get("fiber_type")
+    fiber_dosage = 0.0
+    for f_label, f_col in FIBER_TYPE_MAP.items():
+        if f_col and f_col in r and float(r[f_col]) > 0:
+            fiber_type = f_label
+            fiber_dosage = float(r[f_col])
+            break
+    if not fiber_type or fiber_dosage == 0.0:
+        fiber_type = fiber_type if fiber_type and fiber_dosage > 0 else "None"
+
+    # 2. Bacteria Type & Dosage
+    bacteria_type = raw_df.attrs.get("bacteria_type")
+    bacteria_dosage = 0.0
+    for b_label, b_col in BACTERIA_TYPE_MAP.items():
+        if b_col and b_col in r and float(r[b_col]) > 0:
+            bacteria_type = b_label
+            bacteria_dosage = float(r[b_col])
+            break
+    if not bacteria_type or bacteria_dosage == 0.0:
+        bacteria_type = bacteria_type if bacteria_type and bacteria_dosage > 0 else "None"
+
+    # 3. Nutrient Type & Dosage
+    nutrient_type = raw_df.attrs.get("nutrient_type")
+    nutrient_dosage = 0.0
+    for n_label, n_col in NUTRIENT_TYPE_MAP.items():
+        if n_col and n_col in r and float(r[n_col]) > 0:
+            nutrient_type = n_label
+            nutrient_dosage = float(r[n_col])
+            break
+    if not nutrient_type or nutrient_dosage == 0.0:
+        nutrient_type = nutrient_type if nutrient_type and nutrient_dosage > 0 else "None"
+
+    # 4. Delivery System & Dosage
+    delivery_system = raw_df.attrs.get("delivery_system", "None")
+    delivery_dosage = 0.0
+    for d_label, d_col in DELIVERY_SYSTEM_MAP.items():
+        if d_col and d_col in r and float(r[d_col]) > 0:
+            delivery_system = d_label
+            delivery_dosage = float(r[d_col])
+            break
+    if delivery_system in ("None", "Bacteria Only"):
+        delivery_dosage = 0.0
+
+    # 5. Curing Environment
+    curing_env = raw_df.attrs.get("curing_env", "Fresh Water Curing")
+    for c_label, c_col in CURING_ENV_MAP.items():
+        if c_col in r and float(r[c_col]) >= 0.5:
+            curing_env = c_label
             break
 
-    if target_path is None:
-        st.error("No model .joblib file found in the repository or models/ folder.")
-        return None
+    collective_dict = {
+        "Cement(kg/m3)": float(r["Cement(kg/m3)"]),
+        "WATER(kg/m3)": float(r["WATER(kg/m3)"]),
+        "CA(kg/m3)": float(r["CA(kg/m3)"]),
+        "FA (kg/m3)SAND": float(r["FA (kg/m3)SAND"]),
+        "SuperPlasticizer(kg/m3)": float(r["SuperPlasticizer(kg/m3)"]),
+        "Silica Fumes(kg/m3)": float(r["Silica Fumes(kg/m3)"]),
+        "Fly Ash(kg/m3)": float(r["Fly Ash(kg/m3)"]),
+        "T(°C) OF CUBE": float(r["T(°C) OF CUBE"]),
+        "Fiber Type": fiber_type,
+        "Fiber Dosage (kg/m3)": fiber_dosage,
+        "Bacteria Type": bacteria_type,
+        "Bacteria Dosage (kg/m3)": bacteria_dosage,
+        "Bacteria(cell/ml)": float(r["Bacteria(cell/ml)"]),
+        "Nutrient Type": nutrient_type,
+        "Nutrient Dosage (kg/m3)": nutrient_dosage,
+        "Delivery System": delivery_system,
+        "Delivery Dosage (kg/m3)": delivery_dosage,
+        "Curing Environment": curing_env,
+        "Curing Days": float(r["Curing Days"]),
+        "Healing Period Days": float(r["Healing Period Days"]),
+        "APPLIED LOAD FOR HEALING(MPa)": float(r["APPLIED LOAD FOR HEALING(MPa)"]),
+    }
+    return pd.DataFrame([collective_dict], columns=COLLECTIVE_21_FEATURES)
 
-    try:
-        return joblib.load(target_path)
-    except Exception as e:
-        st.error(f"❌ Failed to load model: {repr(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        return None
 
-def extract_accuracy_metrics(bundle):
-    """Retrieve RMSE and MAE from the loaded model bundle."""
-    rmse, mae = None, None
-    if isinstance(bundle, dict):
-        if "independent_test_metrics" in bundle and isinstance(bundle["independent_test_metrics"], dict):
-            rmse = bundle["independent_test_metrics"].get("RMSE")
-            mae = bundle["independent_test_metrics"].get("MAE")
-        if rmse is None and "training_cv_metrics" in bundle and isinstance(bundle["training_cv_metrics"], dict):
-            rmse = bundle["training_cv_metrics"].get("RMSE")
-            mae = bundle["training_cv_metrics"].get("MAE")
-        if rmse is None and "best_cv_rmse" in bundle:
-            b = bundle["best_cv_rmse"]
-            if isinstance(b, dict):
-                rmse = b.get("XGB", next(iter(b.values()), None))
-            elif isinstance(b, (int, float)):
-                rmse = float(b)
+def _align_schema_for_bundle(bundle: Dict[str, Any], new_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Reconciles the 30-column raw DataFrame with whatever internal schema
+    (`feature_names_in_`, `collective_columns`, `feature_names`, or custom
+    mapping) is expected by `bundle["models"][bundle["selected_strategy"]]`.
+    """
+    if not isinstance(bundle, dict) or "models" not in bundle:
+        return new_data
 
-    if rmse is None:
-        rmse = 4.15
-    if mae is None:
-        # Standard empirical ratio for tree ensembles on this dataset when only CV RMSE is stored
-        mae = round(float(rmse) * 0.72, 2)
-    return float(rmse), float(mae)
+    # If the bundle provides an explicit transformation callable, apply it
+    for fn_key in ("transform_fn", "to_collective", "schema_mapper", "preprocess_raw"):
+        if callable(bundle.get(fn_key)):
+            try:
+                return bundle[fn_key](new_data)
+            except Exception:
+                pass
 
-bundle = load_bundle()
+    model = bundle["models"][bundle["selected_strategy"]]
+    collective_21 = derive_collective21_frame(new_data)
 
-# ================================================================
-# 4. EXACT v29** FEATURE RATIOS & TRANSFORMATIONS
-# ================================================================
-def safe_divide(n, d):
-    d = pd.to_numeric(d, errors="coerce")
-    return n / d.where(np.abs(d) > 1e-12, np.nan)
+    # Build a normalized lookup pool combining raw 30, collective 21, and common aliases
+    pool: Dict[str, Any] = {}
+    for col in new_data.columns:
+        pool[normalized_name(col)] = new_data[col].iloc[0]
+    for col in collective_21.columns:
+        pool[normalized_name(col)] = collective_21[col].iloc[0]
 
-def add_domain_features(frame):
-    frame = frame.copy()
-    cement = pd.to_numeric(frame.get("Cement(kg/m3)"), errors="coerce")
-    coarse = pd.to_numeric(frame.get("CA(kg/m3)"), errors="coerce")
-    sand = pd.to_numeric(frame.get("FA (kg/m3)SAND"), errors="coerce")
-    water = pd.to_numeric(frame.get("WATER(kg/m3)"), errors="coerce")
-    silica = pd.to_numeric(frame.get("Silica Fumes(kg/m3)"), errors="coerce")
-    fly_ash = pd.to_numeric(frame.get("Fly Ash(kg/m3)"), errors="coerce")
-    curing = pd.to_numeric(frame.get("Curing Days"), errors="coerce")
-    healing = pd.to_numeric(frame.get("Healing Period Days"), errors="coerce")
-    load = pd.to_numeric(frame.get("APPLIED LOAD FOR HEALING(MPa)"), errors="coerce")
-    bact_dosage = pd.to_numeric(frame.get("Bacteria Dosage (kg/m³)"), errors="coerce")
-    bact_cells = pd.to_numeric(frame.get("Bacteria(cell/ml)"), errors="coerce")
-    fiber_dosage = pd.to_numeric(frame.get("Fiber Dosage (kg/m³)"), errors="coerce")
-    nutr_dosage = pd.to_numeric(frame.get("Nutrient Dosage (kg/m³)"), errors="coerce")
+    # Common normalized aliases that training pipelines may use for the 21 features
+    c21_row = collective_21.iloc[0]
+    alias_groups = {
+        c21_row["Fiber Type"]: ["fibertype", "fiber", "fibercategory", "typeoffiber"],
+        c21_row["Fiber Dosage (kg/m3)"]: [
+            "fiberdosagekgm3",
+            "fiberdosage",
+            "fiberkgm3",
+            "fibercontentkgm3",
+            "totalfiberkgm3",
+        ],
+        c21_row["Bacteria Type"]: [
+            "bacteriatype",
+            "bacteriaspecies",
+            "typeofbacteria",
+            "bacteriacategory",
+        ],
+        c21_row["Bacteria Dosage (kg/m3)"]: [
+            "bacteriadosagekgm3",
+            "bacteriadosage",
+            "bacteriakgm3",
+            "bacteriacontentkgm3",
+        ],
+        c21_row["Bacteria(cell/ml)"]: [
+            "bacteriacellml",
+            "bacteriaconcentrationcellml",
+            "bacteriaconcentration",
+        ],
+        c21_row["Nutrient Type"]: ["nutrienttype", "nutrient", "typeofnutrient"],
+        c21_row["Nutrient Dosage (kg/m3)"]: [
+            "nutrientdosagekgm3",
+            "nutrientdosage",
+            "nutrientkgm3",
+            "nutrientcontentkgm3",
+        ],
+        c21_row["Delivery System"]: [
+            "deliverysystem",
+            "deliverytype",
+            "deliverymethod",
+            "microcapsuletype",
+            "immobilizationmethod",
+        ],
+        c21_row["Delivery Dosage (kg/m3)"]: [
+            "deliverydosagekgm3",
+            "deliverydosage",
+            "deliverykgm3",
+            "microcapsuledosagekgm3",
+        ],
+        c21_row["Curing Environment"]: [
+            "curingenvironment",
+            "curingcondition",
+            "curingtype",
+            "curingregime",
+            "curingmedium",
+        ],
+        c21_row["Curing Days"]: ["curingdays", "curingage", "curingtime", "curingperioddays"],
+        c21_row["Healing Period Days"]: [
+            "healingperioddays",
+            "healingdays",
+            "healingtime",
+            "healingperiod",
+        ],
+        c21_row["APPLIED LOAD FOR HEALING(MPa)"]: [
+            "appliedloadforhealingmpa",
+            "appliedloadforhealing",
+            "appliedloadmpa",
+            "preloadmpa",
+        ],
+    }
+    for val, aliases in alias_groups.items():
+        for alias in aliases:
+            pool.setdefault(alias, val)
 
-    if cement is not None:
-        supp = (silica.fillna(0.0) if silica is not None else 0.0) + (fly_ash.fillna(0.0) if fly_ash is not None else 0.0)
-        binder = cement + supp
-        frame["ENG_Total_Binder"] = binder
-        if water is not None:
-            frame["ENG_Water_Cement_Ratio"] = safe_divide(water, cement)
-            frame["ENG_Water_Binder_Ratio"] = safe_divide(water, binder)
-        if coarse is not None and sand is not None:
-            agg = coarse + sand
-            frame["ENG_Total_Aggregate"] = agg
-            frame["ENG_Aggregate_Binder_Ratio"] = safe_divide(agg, binder)
-        if fiber_dosage is not None:
-            frame["ENG_Fiber_Binder_Ratio"] = safe_divide(fiber_dosage, binder)
-        if bact_dosage is not None:
-            frame["ENG_BacteriaDosage_Binder_Ratio"] = safe_divide(bact_dosage, binder)
-        if nutr_dosage is not None:
-            frame["ENG_Nutrient_Binder_Ratio"] = safe_divide(nutr_dosage, binder)
-
-    if load is not None and curing is not None:
-        frame["ENG_Load_x_Curing"] = load * curing
-        frame["ENG_Load_per_Curing_Day"] = safe_divide(load, curing)
-    if load is not None and healing is not None:
-        frame["ENG_Load_x_Healing"] = load * healing
-        frame["ENG_Load_per_Healing_Day"] = safe_divide(load, healing)
-    if curing is not None and healing is not None:
-        frame["ENG_Curing_to_Healing_Ratio"] = safe_divide(curing, healing)
-    if load is not None and bact_dosage is not None:
-        frame["ENG_Load_x_Bacteria_Dosage"] = load * bact_dosage
-    if curing is not None and bact_dosage is not None:
-        frame["ENG_Curing_x_Bacteria_Dosage"] = curing * bact_dosage
-    if bact_cells is not None:
-        frame["ENG_Log_Bacteria_Cells"] = np.log1p(bact_cells.clip(lower=0))
-
-    return frame
-
-def predict_from_bundle(bundle, df_raw_inputs):
-    df_eng = add_domain_features(df_raw_inputs)
-    schema = bundle["feature_schema"]
-    df_prep = df_eng[list(schema.keys())].copy()
-    for col, role in schema.items():
-        if role == "numeric":
-            df_prep[col] = pd.to_numeric(df_prep[col], errors="coerce")
-        else:
-            df_prep[col] = df_prep[col].astype(str)
-
-    df_prep = df_prep.drop(columns=bundle.get("dropped_unusable_columns", []), errors="ignore")
-    df_model = df_prep[bundle["model_input_columns"]]
-
-    if bundle.get("selected_strategy") == "ensemble":
-        preds = np.column_stack([
-            bundle["models"][name].predict(df_model) for name in bundle["model_order"]
-        ])
-        weights = np.array([bundle["weights"][name] for name in bundle["model_order"]])
-        return float(preds @ weights)
-    elif "pipeline" in bundle:
-        return float(bundle["pipeline"].predict(df_model)[0])
+    # Determine expected column list from model or bundle metadata
+    expected_cols: Optional[List[str]] = None
+    if hasattr(model, "feature_names_in_"):
+        expected_cols = list(model.feature_names_in_)
+    elif hasattr(model, "steps") and hasattr(model.steps[0][1], "feature_names_in_"):
+        expected_cols = list(model.steps[0][1].feature_names_in_)
     else:
-        strat = bundle.get("selected_strategy", bundle["model_order"][0])
-        return float(bundle["models"][strat].predict(df_model)[0])
+        for key in (
+            "collective_columns",
+            "feature_names",
+            "feature_columns",
+            "input_columns",
+            "columns",
+        ):
+            if key in bundle and isinstance(bundle[key], (list, tuple, pd.Index)):
+                expected_cols = list(bundle[key])
+                break
 
-# ================================================================
-# 5. POP-UP MODAL DIALOG FUNCTION
-# ================================================================
-_dialog_decorator = getattr(st, "dialog", getattr(st, "experimental_dialog", None))
+    if expected_cols:
+        aligned_row = {}
+        for col in expected_cols:
+            norm_key = normalized_name(col)
+            if col in new_data.columns:
+                aligned_row[col] = new_data[col].iloc[0]
+            elif col in collective_21.columns:
+                aligned_row[col] = collective_21[col].iloc[0]
+            elif norm_key in pool:
+                aligned_row[col] = pool[norm_key]
+            else:
+                aligned_row[col] = 0.0
+        return pd.DataFrame([aligned_row], columns=expected_cols)
 
-if _dialog_decorator is not None:
-    @_dialog_decorator("🎯 Self-Healing Concrete Prediction Result")
-    def show_prediction_popup(pred_val, rmse_val, mae_val, wc_ratio, wb_ratio, total_b, curing_env, curing_days, bacteria_type):
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Predicted Compressive Strength</div>
-            <div class="kpi-value">{pred_val:.2f}</div>
-            <div class="kpi-unit">MPa (± {mae_val:.2f} MPa MAE)</div>
-        </div>
-        <div class="metric-row">
-            <div class="metric-badge">
-                <div class="metric-badge-label">Model RMSE</div>
-                <div class="metric-badge-val">{rmse_val:.2f} MPa</div>
-            </div>
-            <div class="metric-badge">
-                <div class="metric-badge-label">Model MAE</div>
-                <div class="metric-badge-val">{mae_val:.2f} MPa</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    return new_data
 
-        st.markdown("#### Key Mix Summary")
-        st.write(f"• **Expected Strength Range:** `{max(0.0, pred_val - mae_val):.2f}` to `{pred_val + mae_val:.2f} MPa`")
-        st.write(f"• **Water/Cement (W/C) Ratio:** `{wc_ratio:.3f}` | **Water/Binder (W/B) Ratio:** `{wb_ratio:.3f}`")
-        st.write(f"• **Total Binder:** `{total_b:.1f} kg/m³`")
-        st.write(f"• **Bio-Healing Agent:** `{bacteria_type}` | **Curing:** `{curing_days} days ({curing_env})`")
 
-        if st.button("Close Pop-Up", type="primary", use_container_width=True):
-            st.rerun()
+def predict_with_bundle(bundle, new_data):
+    # The bundle handles internal transformations. 
+    import sys
+    sys.modules['__main__'].normalized_name = normalized_name
+    
+    # Internal logic of bundle:
+    collective_frame = _align_schema_for_bundle(bundle, new_data)
+    
+    # We must replicate the schema mapping logic expected by the model
+    try:
+        prediction = bundle["models"][bundle["selected_strategy"]].predict(collective_frame)
+    except Exception:
+        # Fallback if the model directly expects the derived 21-feature frame
+        collective_frame = derive_collective21_frame(new_data)
+        prediction = bundle["models"][bundle["selected_strategy"]].predict(collective_frame)
+    return prediction
 
-# ================================================================
-# 6. USER CONTROLS WITH DATASET BOUNDS
-# ================================================================
-col_left, col_right = st.columns([2, 1], gap="large")
 
-with col_left:
-    st.subheader("1. Standard Mix Ingredients")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        cement = st.number_input("Cement (kg/m³)", min_value=171.60, max_value=650.00, value=400.00, step=5.0)
-        water = st.number_input("Water (kg/m³)", min_value=122.50, max_value=300.00, value=160.00, step=2.5)
-        sand = st.number_input("Fine Aggregate (kg/m³)", min_value=350.00, max_value=1500.00, value=1000.00, step=10.0)
-    with c2:
-        coarse_agg = st.number_input("Coarse Aggregate (kg/m³)", min_value=0.00, max_value=1477.74, value=600.00, step=10.0)
-        silica_fumes = st.number_input("Silica Fumes (kg/m³)", min_value=0.00, max_value=50.00, value=0.00, step=1.0)
-        fly_ash = st.number_input("Fly Ash (kg/m³)", min_value=0.00, max_value=350.00, value=0.00, step=5.0)
-    with c3:
-        sp = st.number_input("Superplasticizer (kg/m³)", min_value=0.00, max_value=15.675, value=2.00, step=0.1)
-        temp_cube = st.number_input("Cube Temperature (°C)", min_value=22.0, max_value=200.0, value=30.0, step=1.0)
-
-    st.subheader("2. Fiber Reinforcement")
-    f_col1, f_col2 = st.columns(2)
-    with f_col1:
-        fiber_type = st.selectbox("Fiber Type", ["None", "Steel Fiber", "Glass Fiber", "Basalt Fiber", "PVA Fiber"])
-    with f_col2:
-        max_f = {"None": 0.0, "Steel Fiber": 117.0, "Glass Fiber": 6.39, "Basalt Fiber": 4.05, "PVA Fiber": 16.04}[fiber_type]
-        fiber_dosage = st.number_input("Fiber Dosage (kg/m³)", min_value=0.0, max_value=max(0.01, max_f), value=0.0 if fiber_type == "None" else min(2.0, max_f), disabled=(fiber_type == "None"))
-
-    st.subheader("3. Bio-Healing Agent & Microcapsule Delivery")
-    b_col1, b_col2, b_col3 = st.columns(3)
-    with b_col1:
-        bacteria_type = st.selectbox("Bacteria Type", ["None", "Bacillus Subtilis", "Rhizobium Leguminosarum", "Bacillus Sphaericus", "Bacillus Megaterium"])
-        max_b = {"None": 0.0, "Bacillus Subtilis": 26.7, "Rhizobium Leguminosarum": 17.0, "Bacillus Sphaericus": 22.5, "Bacillus Megaterium": 22.5}[bacteria_type]
-        bacteria_dosage = st.number_input("Bacteria Dosage (kg/m³)", min_value=0.0, max_value=max(0.01, max_b), value=0.0 if bacteria_type == "None" else min(4.0, max_b), disabled=(bacteria_type == "None"))
-    with b_col2:
-        bacteria_cells = st.number_input("Concentration (cell/ml)", min_value=0.0, max_value=2.8e9, value=0.0 if bacteria_type == "None" else 1.0e7, step=1.0e6, format="%.2e", disabled=(bacteria_type == "None"))
-    with b_col3:
-        delivery_type = st.selectbox("Delivery Carrier", ["None", "Bacteria Only", "Sodium Silicate Microcapsule", "Cement Microcapsule"])
-        max_del = 12.25 if delivery_type in ["Sodium Silicate Microcapsule", "Cement Microcapsule"] else 0.0
-        delivery_dosage = st.number_input("Carrier Dosage (kg/m³)", min_value=0.0, max_value=max(0.01, max_del), value=0.0 if max_del == 0.0 else 5.0, disabled=(max_del == 0.0))
-
-    st.subheader("4. Nutrients & Curing Environment")
-    n_col1, n_col2 = st.columns(2)
-    with n_col1:
-        nutrient_type = st.selectbox("Nutrient Substrate", ["None", "Calcium Lactate", "Calcium Lactate Pentahydrate", "Calcium Nitrate"])
-        max_nutr = {"None": 0.0, "Calcium Lactate": 44.323, "Calcium Lactate Pentahydrate": 15.4, "Calcium Nitrate": 32.0}[nutrient_type]
-        nutrient_dosage = st.number_input("Nutrient Dosage (kg/m³)", min_value=0.0, max_value=max(0.01, max_nutr), value=0.0 if nutrient_type == "None" else min(2.0, max_nutr), disabled=(nutrient_type == "None"))
-    with n_col2:
-        curing_env = st.selectbox("Curing Exposure", ["Fresh Water Curing", "Sulfate Water Curing", "Humidity Air Curing", "Dry Air Curing", "Sea Water Curing"])
-        curing_days = st.number_input("Curing Time (Days)", min_value=3, max_value=180, value=28, step=1)
-
-    c_extra1, c_extra2 = st.columns(2)
-    with c_extra1:
-        healing_days = st.number_input("Healing Period (Days)", min_value=0, max_value=124, value=0, step=1)
-    with c_extra2:
-        applied_load = st.number_input("Pre-Damage Load (MPa)", min_value=0.0, max_value=60.3, value=0.0, step=1.0)
-
-# ================================================================
-# 7. REAL-TIME PREDICTION DISPLAY & POP-UP TRIGGER
-# ================================================================
-with col_right:
-    st.subheader("Predicted Strength Output")
-    predict_clicked = st.button("🚀 Predict Compressive Strength", type="primary", use_container_width=True)
-
-    if bundle is not None:
-        input_row = pd.DataFrame([{
-            "Bacteria(cell/ml)": float(bacteria_cells),
-            "T(°C) OF CUBE": float(temp_cube),
-            "Cement(kg/m3)": float(cement),
-            "CA(kg/m3)": float(coarse_agg),
-            "FA (kg/m3)SAND": float(sand),
-            "WATER(kg/m3)": float(water),
-            "SuperPlasticizer(kg/m3)": float(sp),
-            "Silica Fumes(kg/m3)": float(silica_fumes),
-            "Fly Ash(kg/m3)": float(fly_ash),
-            "Curing Days": float(curing_days),
-            "Healing Period Days": float(healing_days),
-            "APPLIED LOAD FOR HEALING(MPa)": float(applied_load),
-            "Fiber Dosage (kg/m³)": float(fiber_dosage),
-            "Bacteria Dosage (kg/m³)": float(bacteria_dosage),
-            "Healing Delivery Dosage (kg/m³)": float(delivery_dosage),
-            "Nutrient Dosage (kg/m³)": float(nutrient_dosage),
-            "Fiber Type": str(fiber_type),
-            "Bacteria Type": str(bacteria_type),
-            "Healing Delivery Type": str(delivery_type),
-            "Nutrient Type": str(nutrient_type),
-            "Curing Environment": str(curing_env),
-        }])
-
-        try:
-            pred_val = predict_from_bundle(bundle, input_row)
-            rmse_val, mae_val = extract_accuracy_metrics(bundle)
-            total_b = cement + silica_fumes + fly_ash
-            wc_ratio = water / cement
-            wb_ratio = water / total_b
-
-            # Trigger pop-up modal when user clicks the prediction button
-            if predict_clicked and _dialog_decorator is not None:
-                show_prediction_popup(
-                    pred_val, rmse_val, mae_val,
-                    wc_ratio, wb_ratio, total_b,
-                    curing_env, curing_days, bacteria_type
-                )
-
-            st.markdown(f"""
-            <div class="kpi-card">
-                <div class="kpi-title">Predicted Compressive Strength</div>
-                <div class="kpi-value">{pred_val:.2f}</div>
-                <div class="kpi-unit">MPa</div>
-            </div>
-            <div class="metric-row">
-                <div class="metric-badge">
-                    <div class="metric-badge-label">RMSE</div>
-                    <div class="metric-badge-val">{rmse_val:.2f} MPa</div>
-                </div>
-                <div class="metric-badge">
-                    <div class="metric-badge-label">MAE</div>
-                    <div class="metric-badge-val">{mae_val:.2f} MPa</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown("---")
-            st.markdown("### Mix Physical Metrics")
-            st.write(f"• **Water/Cement (W/C) Ratio:** `{wc_ratio:.3f}`")
-            st.write(f"• **Water/Binder (W/B) Ratio:** `{wb_ratio:.3f}`")
-            st.write(f"• **Total Binder:** `{total_b:.1f} kg/m³`")
-            st.write(f"• **Aggregate/Binder Ratio:** `{(coarse_agg + sand) / total_b:.2f}`")
-        except Exception as pred_err:
-            st.error(f"Prediction calculation error: {repr(pred_err)}")
-            import traceback
-  
+# =============================================================================
+# 3. F
