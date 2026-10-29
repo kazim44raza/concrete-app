@@ -1,21 +1,18 @@
 """
 AI-Based Prediction of Self-Healing Concrete Compressive Strength
 =================================================================
-UI/UX Pro Max Clean White Laboratory Edition (Fira Sans + Fira Code)
-  - Clean High-Contrast White Theme:
-      * Background: #F8FAFC (Alabaster White) & #FFFFFF (Pure White Cards)
-      * Text: #0F172A (Deep Slate Ink, >10:1 AAA Contrast) & #475569 (Muted Slate)
-      * Accents: #0284C7 (Engineering Blue) & #16A34A (Bio-Emerald Green)
-  - All Dataset Validation & Parity Errors Expressed in Percentage (%):
-      * MAPE (%): Mean Absolute Percentage Error across mixes
-      * RMSPE (%): Root Mean Square Percentage Error across mixes
-      * NRMSE (%): Normalized Root Mean Square Error (%)
-  - Strictly Uniform Typography System:
-      * All Main Section Headings (.main-section-heading): 18px, Font-Weight 700 (Bold)
-      * All Card & Plot Sub-Headings (.sub-card-heading) & Expanders: 15px, Font-Weight 700 (Bold)
-      * All Navigation Tabs: 14px, Font-Weight 700 (Bold)
-      * All Input Parameter Labels: 13px, Font-Weight 600 (Semi-Bold)
-      * Monospace Engineering Readouts: Fira Code
+UI/UX Pro Max Clean White Laboratory Edition (Mobile-Responsive + Touch-Safe Charts)
+  - Touch-Safe / Scroll-Safe Charts:
+      * dragmode=False, scrollZoom=False, fixedrange=True on all axes, displayModeBar=False
+      * Touching or swiping on a phone scrolls the page smoothly without zooming/distorting plots
+  - Full Mobile & Tablet Responsiveness (@media <= 768px & <= 480px):
+      * Metric badges stack into 2x2 grid on phones (1x1 on small phones)
+      * Tabs wrap cleanly across mobile screens
+      * Compact left/right chart margins and concise feature labels prevent horizontal squishing
+  - High-Contrast White Theme:
+      * Deep Slate (#0F172A) axis titles, tick labels, legends, and outside bar values
+  - Supports Both Percentage (%) Errors and MPa Errors on your existing .joblib file:
+      * MAPE = 3.01% (MAE = 1.02 MPa) | NRMSE = 3.96% (RMSE = 1.66 MPa) | RMSPE = 5.47%
 """
 
 from __future__ import annotations
@@ -50,14 +47,12 @@ def normalized_name(value: Any) -> str:
 
 sys.modules["__main__"].normalized_name = normalized_name
 
-# A. Fix for ColumnTransformer _RemainderColsList across scikit-learn versions
 import sklearn.compose._column_transformer
 if not hasattr(sklearn.compose._column_transformer, "_RemainderColsList"):
     class _RemainderColsList(list):
         pass
     sklearn.compose._column_transformer._RemainderColsList = _RemainderColsList
 
-# B. Fix for SimpleImputer _fill_dtype across scikit-learn versions
 from sklearn.impute import SimpleImputer
 _orig_imputer_transform = SimpleImputer.transform
 def _patched_imputer_transform(self, X):
@@ -69,7 +64,6 @@ def _patched_imputer_transform(self, X):
     return _orig_imputer_transform(self, X)
 SimpleImputer.transform = _patched_imputer_transform
 
-# C. Fix for OneHotEncoder _infrequent_enabled across scikit-learn versions
 from sklearn.preprocessing import OneHotEncoder
 _orig_ohe_transform = OneHotEncoder.transform
 def _patched_ohe_transform(self, X):
@@ -81,7 +75,6 @@ def _patched_ohe_transform(self, X):
     return _orig_ohe_transform(self, X)
 OneHotEncoder.transform = _patched_ohe_transform
 
-# D. Fix for CatBoostSklearnWrapper if loading the 4-model ensemble bundle
 from sklearn.base import BaseEstimator, RegressorMixin
 try:
     from catboost import CatBoostRegressor
@@ -108,7 +101,7 @@ sys.modules["__main__"].CatBoostSklearnWrapper = CatBoostSklearnWrapper
 
 
 # =============================================================================
-# 2. PAGE CONFIGURATION & UI/UX PRO MAX CLEAN WHITE THEME (STRICT UNIFORM FONTS)
+# 2. PAGE CONFIGURATION & CLEAN WHITE THEME (MOBILE-RESPONSIVE & HIGH-CONTRAST)
 # =============================================================================
 
 st.set_page_config(
@@ -116,6 +109,15 @@ st.set_page_config(
     page_icon="🏗️",
     layout="wide",
 )
+
+# Shared Plotly config that locks touch-panning/zooming so mobile scrolling never distorts plots
+LOCKED_PLOT_CONFIG: Dict[str, Any] = {
+    "displayModeBar": False,
+    "scrollZoom": False,
+    "doubleClick": False,
+    "showTips": False,
+    "responsive": True,
+}
 
 st.markdown(
     """
@@ -127,10 +129,9 @@ st.markdown(
             --color-bg-card: #FFFFFF;
             --color-bg-subtle: #F1F5F9;
             --color-text-primary: #0F172A;
-            --color-text-secondary: #334155;
-            --color-text-muted: #64748B;
-            --color-border: #E2E8F0;
-            --color-border-hover: #94A3B8;
+            --color-text-secondary: #1E293B;
+            --color-text-muted: #475569;
+            --color-border: #CBD5E1;
             --color-accent-blue: #0284C7;
             --color-accent-green: #16A34A;
             --color-destructive: #DC2626;
@@ -143,18 +144,20 @@ st.markdown(
             font-family: var(--font-sans) !important;
             background-color: var(--color-bg-page) !important;
             color: var(--color-text-primary) !important;
+            overflow-x: hidden !important;
         }
 
         .block-container {
-            padding-top: 1.8rem !important;
-            padding-bottom: 2.5rem !important;
+            padding-top: 1.5rem !important;
+            padding-bottom: 2.2rem !important;
+            padding-left: 1.2rem !important;
+            padding-right: 1.2rem !important;
             max-width: 1440px !important;
         }
 
-        /* UI/UX Pro Max Stagger & Keyframe Animations */
         @keyframes staggerReveal {
-            0% { opacity: 0; transform: translateY(12px) scale(0.99); }
-            100% { opacity: 1; transform: translateY(0) scale(1); }
+            0% { opacity: 0; transform: translateY(8px); }
+            100% { opacity: 1; transform: translateY(0); }
         }
 
         @keyframes pulseStatus {
@@ -162,43 +165,30 @@ st.markdown(
             50% { transform: scale(1.12); opacity: 0.88; box-shadow: 0 0 0 6px rgba(22, 163, 74, 0); }
         }
 
-        @keyframes kpiShadowPulse {
-            0%, 100% { border-color: rgba(2, 132, 199, 0.45); box-shadow: 0 12px 28px -8px rgba(2, 132, 199, 0.14); }
-            50% { border-color: rgba(22, 163, 74, 0.50); box-shadow: 0 12px 28px -8px rgba(22, 163, 74, 0.16); }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after {
-                animation-duration: 0.01ms !important;
-                animation-iteration-count: 1 !important;
-                transition-duration: 0.01ms !important;
-            }
-        }
-
-        /* Top Engineering Hero Banner (Clean White Card + Blue Accent) */
+        /* Top Engineering Hero Banner */
         .app-hero-banner {
             background: linear-gradient(135deg, #FFFFFF 0%, #F0F9FF 100%);
             border: 1px solid var(--color-border);
             border-left: 4px solid var(--color-accent-blue);
             border-radius: 14px;
-            padding: 20px 26px;
-            margin-bottom: 22px;
+            padding: 18px 24px;
+            margin-bottom: 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-            gap: 16px;
-            animation: staggerReveal 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            gap: 14px;
+            animation: staggerReveal 0.35s ease-out forwards;
             box-shadow: 0 6px 20px -6px rgba(15, 23, 42, 0.06);
         }
 
         .app-hero-title {
             font-family: var(--font-sans) !important;
-            font-size: 24px !important;
+            font-size: 23px !important;
             font-weight: 800 !important;
             color: var(--color-text-primary) !important;
             letter-spacing: -0.01em !important;
-            line-height: 1.25 !important;
+            line-height: 1.28 !important;
             margin: 0 0 6px 0 !important;
         }
 
@@ -208,20 +198,22 @@ st.markdown(
             font-weight: 500 !important;
             color: var(--color-text-muted) !important;
             margin: 0 !important;
+            line-height: 1.45 !important;
         }
 
         .status-pill {
             display: inline-flex;
             align-items: center;
-            gap: 9px;
+            gap: 8px;
             background: #F0FDF4;
-            border: 1px solid #BBF7D0;
+            border: 1px solid #86EFAC;
             border-radius: 999px;
-            padding: 7px 15px;
+            padding: 6px 14px;
             font-family: var(--font-mono) !important;
-            font-size: 12px !important;
+            font-size: 11.5px !important;
             font-weight: 600 !important;
             color: #15803D !important;
+            white-space: nowrap;
         }
 
         .status-dot {
@@ -230,10 +222,11 @@ st.markdown(
             border-radius: 50%;
             background: var(--color-accent-green);
             animation: pulseStatus 2.2s infinite ease-in-out;
+            flex-shrink: 0;
         }
 
         /* =====================================================================
-           STRICT UNIFORM TYPOGRAPHY HIERARCHY (UI/UX PRO MAX — WHITE THEME)
+           STRICT UNIFORM TYPOGRAPHY HIERARCHY
            1. ALL Main Section Headings (.main-section-heading) -> 18px Bold (700)
            2. ALL Sub-Card / Chart Headings (.sub-card-heading) -> 15px Bold (700)
            3. ALL Widget Input Labels -> 13px Semi-Bold (600)
@@ -253,8 +246,8 @@ st.markdown(
             border-radius: 0 10px 10px 0;
             display: flex;
             align-items: center;
-            gap: 11px;
-            animation: staggerReveal 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            flex-wrap: wrap;
+            gap: 10px;
             box-shadow: 0 2px 8px -2px rgba(2, 132, 199, 0.08);
         }
 
@@ -268,6 +261,7 @@ st.markdown(
             border-radius: 5px !important;
             text-transform: uppercase !important;
             letter-spacing: 0.05em !important;
+            flex-shrink: 0;
         }
 
         .sub-card-heading {
@@ -279,26 +273,21 @@ st.markdown(
             line-height: 1.4 !important;
             margin: 6px 0 12px 0 !important;
             padding-bottom: 8px !important;
-            border-bottom: 1.5px solid var(--color-border) !important;
+            border-bottom: 1.5px solid #E2E8F0 !important;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
         }
 
-        /* Uniform Streamlit Expander Headers (15px Bold 700 — White Card) */
+        /* Uniform Streamlit Expander Headers (15px Bold 700) */
         div[data-testid="stExpander"] {
-            background: var(--color-bg-card) !important;
-            border: 1px solid var(--color-border) !important;
+            background: #FFFFFF !important;
+            border: 1px solid #CBD5E1 !important;
             border-radius: 12px !important;
             margin-bottom: 14px !important;
             box-shadow: 0 3px 12px -4px rgba(15, 23, 42, 0.05) !important;
-            transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease !important;
-            animation: staggerReveal 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-        }
-
-        div[data-testid="stExpander"]:hover {
-            border-color: #7DD3FC !important;
-            box-shadow: 0 8px 20px -6px rgba(2, 132, 199, 0.12) !important;
         }
 
         div[data-testid="stExpander"] details summary {
@@ -310,8 +299,7 @@ st.markdown(
             font-family: var(--font-sans) !important;
             font-size: 15px !important;
             font-weight: 700 !important;
-            color: var(--color-text-primary) !important;
-            letter-spacing: 0.01em !important;
+            color: #0F172A !important;
         }
 
         /* Uniform Input Widget Labels (13px Semi-Bold 600) */
@@ -319,58 +307,89 @@ st.markdown(
             font-family: var(--font-sans) !important;
             font-size: 13px !important;
             font-weight: 600 !important;
-            color: var(--color-text-secondary) !important;
-            letter-spacing: 0.01em !important;
+            color: #1E293B !important;
         }
 
-        /* Clean White Input Fields & Selectboxes with Dark Text */
         div[data-testid="stNumberInput"] input,
         div[data-baseweb="select"] > div,
         div[data-baseweb="base-input"] {
             background-color: #FFFFFF !important;
-            color: var(--color-text-primary) !important;
-            border-color: #CBD5E1 !important;
+            color: #0F172A !important;
+            border-color: #94A3B8 !important;
+            min-height: 42px !important;
         }
 
         div[data-testid="stNumberInput"] input {
             font-family: var(--font-mono) !important;
             font-size: 13.5px !important;
             font-weight: 600 !important;
-            color: var(--color-text-primary) !important;
+            color: #0F172A !important;
         }
 
-        /* Uniform Tab Labels (14px Bold 700) */
+        /* =====================================================================
+           HIGH-CONTRAST VISIBLE TABS (Wraps cleanly on mobile phones)
+           ===================================================================== */
+        div[data-baseweb="tab-list"] {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+            background-color: #E2E8F0 !important;
+            padding: 6px !important;
+            border-radius: 12px !important;
+            margin-bottom: 16px !important;
+        }
+
         button[data-baseweb="tab"] {
             cursor: pointer !important;
-            background-color: transparent !important;
+            background-color: #FFFFFF !important;
+            border: 1px solid #CBD5E1 !important;
+            border-radius: 8px !important;
+            padding: 10px 16px !important;
+            min-height: 44px !important;
+            opacity: 1 !important;
             transition: all 0.2s ease !important;
+            flex: 1 1 auto !important;
         }
 
-        button[data-baseweb="tab"] p {
+        button[data-baseweb="tab"] p,
+        button[data-baseweb="tab"] div,
+        button[data-baseweb="tab"] span {
             font-family: var(--font-sans) !important;
             font-size: 14px !important;
             font-weight: 700 !important;
-            color: var(--color-text-secondary) !important;
+            color: #1E293B !important;
+            opacity: 1 !important;
+            white-space: normal !important;
+            text-align: center !important;
         }
 
-        button[data-baseweb="tab"][aria-selected="true"] p {
-            color: var(--color-accent-blue) !important;
+        button[data-baseweb="tab"]:hover {
+            border-color: #0284C7 !important;
+            background-color: #F0F9FF !important;
         }
 
-        /* Animated Action Buttons with Focus Rings */
+        button[data-baseweb="tab"][aria-selected="true"] {
+            background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%) !important;
+            border-color: #0284C7 !important;
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25) !important;
+        }
+
+        button[data-baseweb="tab"][aria-selected="true"] p,
+        button[data-baseweb="tab"][aria-selected="true"] div,
+        button[data-baseweb="tab"][aria-selected="true"] span {
+            color: #FFFFFF !important;
+        }
+
+        /* Action Buttons (Touch-Friendly 44px+ min-height) */
         div.stButton > button {
             font-family: var(--font-sans) !important;
             font-size: 14px !important;
             font-weight: 700 !important;
             border-radius: 10px !important;
-            padding: 0.58rem 1rem !important;
+            padding: 0.62rem 1rem !important;
+            min-height: 44px !important;
             cursor: pointer !important;
-            transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
-        }
-
-        div.stButton > button:focus-visible {
-            outline: 2px solid var(--color-accent-blue) !important;
-            outline-offset: 2px !important;
+            transition: all 0.2s ease !important;
         }
 
         div.stButton > button[kind="primary"] {
@@ -380,47 +399,28 @@ st.markdown(
             box-shadow: 0 6px 16px -4px rgba(2, 132, 199, 0.35) !important;
         }
 
-        div.stButton > button[kind="primary"]:hover {
-            transform: translateY(-2px) !important;
-            box-shadow: 0 10px 22px -4px rgba(2, 132, 199, 0.50) !important;
-        }
-
         div.stButton > button[kind="secondary"] {
             background: #FFFFFF !important;
-            border: 1.5px solid #CBD5E1 !important;
-            color: var(--color-text-primary) !important;
-            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04) !important;
+            border: 1.5px solid #94A3B8 !important;
+            color: #0F172A !important;
         }
 
-        div.stButton > button[kind="secondary"]:hover {
-            border-color: var(--color-accent-blue) !important;
-            color: var(--color-accent-blue) !important;
-            background: #F0F9FF !important;
-            transform: translateY(-2px) !important;
-        }
-
-        /* Animated Hero KPI Prediction Card (Clean White + Soft Sky Glow) */
+        /* Hero KPI Prediction Card */
         .kpi-card {
-            background: radial-gradient(circle at top right, rgba(2, 132, 199, 0.08), transparent 65%),
-                        linear-gradient(145deg, #FFFFFF 0%, #F8FAFC 100%);
-            border: 1.5px solid #7DD3FC;
+            background: linear-gradient(145deg, #FFFFFF 0%, #F0F9FF 100%);
+            border: 2px solid #0284C7;
             border-radius: 14px;
-            padding: 24px 20px;
+            padding: 22px 18px;
             text-align: center;
             margin-top: 10px;
             margin-bottom: 16px;
-            animation: staggerReveal 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards, kpiShadowPulse 4s infinite ease-in-out;
-            transition: transform 0.25s ease;
-        }
-
-        .kpi-card:hover {
-            transform: translateY(-2px);
+            box-shadow: 0 10px 24px -6px rgba(2, 132, 199, 0.15);
         }
 
         .kpi-title {
             font-family: var(--font-sans) !important;
             font-size: 12px !important;
-            color: var(--color-text-muted) !important;
+            color: #475569 !important;
             font-weight: 700 !important;
             text-transform: uppercase !important;
             letter-spacing: 0.1em !important;
@@ -428,7 +428,7 @@ st.markdown(
 
         .kpi-value {
             font-family: var(--font-mono) !important;
-            font-size: 52px !important;
+            font-size: 48px !important;
             color: #0284C7 !important;
             font-weight: 700 !important;
             margin: 8px 0 4px 0 !important;
@@ -438,7 +438,7 @@ st.markdown(
         .kpi-unit {
             font-family: var(--font-mono) !important;
             font-size: 16px !important;
-            color: var(--color-text-secondary) !important;
+            color: #1E293B !important;
             font-weight: 600 !important;
         }
 
@@ -450,12 +450,12 @@ st.markdown(
             font-weight: 700 !important;
             font-size: 12.5px !important;
             margin-top: 12px;
-            background: #F0FDF4;
-            color: #15803D;
+            background: #DCFCE7;
+            color: #166534;
             border: 1px solid #86EFAC;
         }
 
-        /* Bento Grid Physical Ratios & Validation Metric Cards (White Cards) */
+        /* Bento Grid Physical Ratios & Validation Metric Cards */
         .ratio-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -465,76 +465,133 @@ st.markdown(
 
         .ratio-tile {
             background: #FFFFFF;
-            border: 1px solid var(--color-border);
+            border: 1px solid #CBD5E1;
             border-radius: 10px;
             padding: 11px 14px;
-            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03);
-            transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .ratio-tile:hover {
-            border-color: #7DD3FC;
-            transform: translateY(-1px);
-            box-shadow: 0 6px 14px -4px rgba(2, 132, 199, 0.10);
+            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
         }
 
         .ratio-tile-label {
             font-family: var(--font-sans) !important;
             font-size: 11.5px !important;
-            font-weight: 600 !important;
-            color: var(--color-text-muted) !important;
+            font-weight: 700 !important;
+            color: #475569 !important;
             text-transform: uppercase !important;
-            letter-spacing: 0.04em !important;
         }
 
         .ratio-tile-val {
             font-family: var(--font-mono) !important;
-            font-size: 17px !important;
+            font-size: 16.5px !important;
             font-weight: 700 !important;
-            color: var(--color-text-primary) !important;
+            color: #0F172A !important;
             margin-top: 3px !important;
         }
 
         .metric-row {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 14px;
+            gap: 12px;
             margin-top: 8px;
             margin-bottom: 18px;
         }
 
         .metric-badge {
             background: #FFFFFF;
-            border: 1px solid var(--color-border);
-            border-top: 3px solid var(--color-accent-blue);
+            border: 1px solid #CBD5E1;
+            border-top: 3.5px solid #0284C7;
             border-radius: 10px;
-            padding: 14px 16px;
+            padding: 14px 12px;
             text-align: center;
-            box-shadow: 0 3px 10px -3px rgba(15, 23, 42, 0.05);
-            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .metric-badge:hover {
-            transform: translateY(-2px);
-            border-color: #7DD3FC;
-            box-shadow: 0 8px 18px -4px rgba(2, 132, 199, 0.12);
+            box-shadow: 0 4px 12px -3px rgba(15, 23, 42, 0.06);
         }
 
         .metric-badge-label {
             font-family: var(--font-sans) !important;
-            font-size: 12px !important;
-            color: var(--color-text-muted) !important;
+            font-size: 11.5px !important;
+            color: #334155 !important;
             text-transform: uppercase !important;
             font-weight: 700 !important;
-            letter-spacing: 0.05em !important;
+            letter-spacing: 0.03em !important;
         }
 
         .metric-badge-val {
             font-family: var(--font-mono) !important;
-            font-size: 22px !important;
-            color: var(--color-accent-blue) !important;
+            font-size: 21px !important;
+            color: #0284C7 !important;
             font-weight: 700 !important;
             margin-top: 4px !important;
+        }
+
+        .metric-badge-sub {
+            font-family: var(--font-mono) !important;
+            font-size: 11.5px !important;
+            color: #475569 !important;
+            font-weight: 600 !important;
+            margin-top: 2px !important;
+        }
+
+        /* Plot Card Wrapper + Touch-Action pan-y so mobile vertical scrolling never gets hijacked */
+        div[data-testid="stPlotlyChart"] {
+            background: #FFFFFF !important;
+            border: 1px solid #CBD5E1 !important;
+            border-radius: 12px !important;
+            padding: 6px !important;
+            box-shadow: 0 4px 12px -4px rgba(15, 23, 42, 0.06) !important;
+            touch-action: pan-y !important;
+        }
+
+        div[data-testid="stPlotlyChart"] * {
+            touch-action: pan-y !important;
+        }
+
+        /* =====================================================================
+           PHONE & TABLET RESPONSIVE BREAKPOINTS (@media <= 768px & <= 480px)
+           ===================================================================== */
+        @media (max-width: 768px) {
+            .block-container {
+                padding-top: 1rem !important;
+                padding-left: 0.65rem !important;
+                padding-right: 0.65rem !important;
+            }
+            .app-hero-banner {
+                padding: 14px 16px !important;
+            }
+            .app-hero-title {
+                font-size: 19px !important;
+            }
+            .main-section-heading {
+                font-size: 16px !important;
+                padding: 10px 12px !important;
+            }
+            .sub-card-heading {
+                font-size: 14px !important;
+            }
+            .metric-row {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 10px !important;
+            }
+            .kpi-value {
+                font-size: 40px !important;
+            }
+            button[data-baseweb="tab"] {
+                width: 100% !important;
+                padding: 8px 12px !important;
+            }
+            button[data-baseweb="tab"] p {
+                font-size: 13px !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .ratio-grid {
+                grid-template-columns: 1fr !important;
+            }
+            .metric-row {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+            .metric-badge-val {
+                font-size: 18px !important;
+            }
         }
     </style>
     """,
@@ -556,7 +613,7 @@ def render_main_heading(step_tag: str, title_text: str) -> None:
 def render_sub_heading(title_text: str, right_badge: str = "") -> None:
     """Renders a strictly uniform 15px Bold (700) card/chart sub-heading."""
     badge_html = (
-        f'<span style="font-family: var(--font-mono); font-size: 12px; color: #0284C7; font-weight: 600;">{right_badge}</span>'
+        f'<span style="font-family: var(--font-mono); font-size: 12px; color: #0284C7; font-weight: 700;">{right_badge}</span>'
         if right_badge
         else ""
     )
@@ -602,6 +659,31 @@ FINAL_CATEGORICAL_VARIABLES: List[str] = [
 FINAL_INPUT_VARIABLES: List[str] = FINAL_NUMERICAL_VARIABLES + FINAL_CATEGORICAL_VARIABLES
 ENCODING: Dict[str, str] = {v: f"X{i+1}" for i, v in enumerate(FINAL_INPUT_VARIABLES)}
 
+# Concise mobile-friendly labels so plots never squish on phone screens
+SHORT_FEATURE_LABELS: Dict[str, str] = {
+    "Bacteria(cell/ml)": "X1: Bacteria (cell/ml)",
+    "T(°C) OF CUBE": "X2: Cube Temp (°C)",
+    "Cement(kg/m3)": "X3: Cement (kg/m³)",
+    "CA(kg/m3)": "X4: Coarse Agg (kg/m³)",
+    "FA (kg/m3)SAND": "X5: Fine Agg/Sand",
+    "WATER(kg/m3)": "X6: Water (kg/m³)",
+    "SuperPlasticizer(kg/m3)": "X7: Superplasticizer",
+    "Silica Fumes(kg/m3)": "X8: Silica Fume",
+    "Fly Ash(kg/m3)": "X9: Fly Ash (kg/m³)",
+    "Curing Days": "X10: Curing Days",
+    "Healing Period Days": "X11: Healing Days",
+    "APPLIED LOAD FOR HEALING(MPa)": "X12: Pre-Load (MPa)",
+    "Fiber Dosage (kg/m³)": "X13: Fiber Dosage",
+    "Bacteria Dosage (kg/m³)": "X14: Bacteria Dosage",
+    "Healing Delivery Dosage (kg/m³)": "X15: Carrier Dosage",
+    "Nutrient Dosage (kg/m³)": "X16: Nutrient Dosage",
+    "Fiber Type": "X17: Fiber Type",
+    "Bacteria Type": "X18: Bacteria Type",
+    "Healing Delivery Type": "X19: Carrier Type",
+    "Nutrient Type": "X20: Nutrient Type",
+    "Curing Environment": "X21: Curing Env",
+}
+
 FIBER_MAX_DOSAGE: Dict[str, float] = {
     "None": 0.0,
     "Steel Fiber": 117.0,
@@ -642,6 +724,14 @@ CURING_OPTIONS: List[str] = [
 
 # Compressed 100% Whole Dataset (All 866 verified mixes)
 _EMBEDDED_FULL_DATASET_B64 = "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"
+
+
+def format_short_feature_name(raw_name: str) -> str:
+    """Maps verbose feature names to concise mobile-safe X1–X21 labels."""
+    for col, short_lbl in SHORT_FEATURE_LABELS.items():
+        if raw_name == col or raw_name.endswith(f": {col}"):
+            return short_lbl
+    return raw_name
 
 
 # =============================================================================
@@ -812,8 +902,8 @@ def classify_structural_grade(mpa: float) -> Tuple[str, str]:
 @st.cache_data
 def get_whole_dataset_and_shap_results(_bundle: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Computes Whole-Dataset (100% Data, N=866) R² Parity Plot arrays, Percentage (%)
-    Error metrics (MAPE %, RMSPE %, NRMSE %), and Whole-Dataset SHAP values (X1–X21).
+    Computes Whole-Dataset (100% Data, N=866) R² Parity Plot arrays, BOTH Percentage (%)
+    and MPa Error metrics, and Whole-Dataset SHAP values (X1–X21).
     """
     raw_json = zlib.decompress(base64.b64decode(_EMBEDDED_FULL_DATASET_B64)).decode("utf-8")
     payload = json.loads(raw_json)
@@ -822,7 +912,7 @@ def get_whole_dataset_and_shap_results(_bundle: Dict[str, Any]) -> Dict[str, Any
     X_full_coll = full_df[FINAL_INPUT_VARIABLES].copy()
     y_full_actual = pd.to_numeric(full_df[TARGET], errors="coerce").to_numpy(dtype=float)
 
-    # 1. Whole-Dataset R² Parity Predictions & Percentage (%) Error Metrics
+    # 1. Whole-Dataset R² Parity Predictions & Error Metrics (Both % and MPa)
     if "whole_parity_data" in _bundle and isinstance(_bundle["whole_parity_data"], dict):
         wp = _bundle["whole_parity_data"]
         y_actual = np.asarray(wp["y_actual"], dtype=float)
@@ -832,22 +922,30 @@ def get_whole_dataset_and_shap_results(_bundle: Dict[str, Any]) -> Dict[str, Any
         y_pred = predict_batch_from_bundle(_bundle, X_full_coll)
 
     safe_actual = np.where(np.abs(y_actual) > 1e-12, y_actual, 1e-12)
-    pct_diff = np.abs(y_actual - y_pred) / safe_actual * 100.0
+    abs_diff_mpa = np.abs(y_actual - y_pred)
+    pct_diff = (abs_diff_mpa / safe_actual) * 100.0
 
     ss_res = float(np.sum((y_actual - y_pred) ** 2))
     ss_tot = float(np.sum((y_actual - np.mean(y_actual)) ** 2))
     r2_full = float(1.0 - ss_res / max(ss_tot, 1e-12))
+
+    rmse_mpa = float(np.sqrt(np.mean((y_actual - y_pred) ** 2)))
+    mae_mpa = float(np.mean(abs_diff_mpa))
     mape_pct = float(np.mean(pct_diff))
     rmspe_pct = float(np.sqrt(np.mean((pct_diff / 100.0) ** 2)) * 100.0)
-    rmse_mpa = float(np.sqrt(np.mean((y_actual - y_pred) ** 2)))
-    nrmse_pct = float((rmse_mpa / max(float(np.mean(y_actual)), 1e-12)) * 100.0)
+    mean_y = max(float(np.mean(y_actual)), 1e-12)
+    nrmse_pct = float((rmse_mpa / mean_y) * 100.0)
+    nmae_pct = float((mae_mpa / mean_y) * 100.0)
 
     if "whole_dataset_metrics" in _bundle and isinstance(_bundle["whole_dataset_metrics"], dict):
         m = _bundle["whole_dataset_metrics"]
         r2_full = float(m.get("R2", r2_full))
+        rmse_mpa = float(m.get("RMSE", rmse_mpa))
+        mae_mpa = float(m.get("MAE", mae_mpa))
         mape_pct = float(m.get("MAPE_pct", mape_pct))
         rmspe_pct = float(m.get("RMSPE_pct", rmspe_pct))
         nrmse_pct = float(m.get("NRMSE_pct", nrmse_pct))
+        nmae_pct = float(m.get("NMAE_pct", nmae_pct))
 
     # 2. Whole-Dataset SHAP Values (X1–X21 Global + X1–X16 Numerical Beeswarm)
     if "whole_shap_data" in _bundle and isinstance(_bundle["whole_shap_data"], dict):
@@ -856,9 +954,10 @@ def get_whole_dataset_and_shap_results(_bundle: Dict[str, Any]) -> Dict[str, Any
         if "Relative_SHAP_Importance_Pct" not in imp_df.columns:
             tot_s = max(float(imp_df["Mean_Absolute_SHAP_MPa"].sum()), 1e-12)
             imp_df["Relative_SHAP_Importance_Pct"] = (imp_df["Mean_Absolute_SHAP_MPa"] / tot_s) * 100.0
+        imp_df["Short_Display_Name"] = imp_df["Display_Name"].apply(format_short_feature_name)
         shap_num = np.asarray(ws["shap_values_num"], dtype=float)
         feat_num = np.asarray(ws["feature_values_num"], dtype=float)
-        num_names = list(ws["numerical_feature_names"])
+        num_names = [format_short_feature_name(n) for n in ws["numerical_feature_names"]]
     else:
         baseline_row = X_full_coll.iloc[0:1].copy()
         for col in FINAL_NUMERICAL_VARIABLES:
@@ -881,11 +980,13 @@ def get_whole_dataset_and_shap_results(_bundle: Dict[str, Any]) -> Dict[str, Any
         tot_abs = max(float(np.sum(mean_abs)), 1e-12)
         mean_abs_pct = (mean_abs / tot_abs) * 100.0
         display_names = [f"{ENCODING[v]}: {v}" for v in FINAL_INPUT_VARIABLES]
+        short_names = [SHORT_FEATURE_LABELS[v] for v in FINAL_INPUT_VARIABLES]
         imp_df = pd.DataFrame(
             {
                 "Feature_ID": [ENCODING[v] for v in FINAL_INPUT_VARIABLES],
                 "Feature": FINAL_INPUT_VARIABLES,
                 "Display_Name": display_names,
+                "Short_Display_Name": short_names,
                 "Feature_Type": [
                     "Numerical" if v in FINAL_NUMERICAL_VARIABLES else "Categorical"
                     for v in FINAL_INPUT_VARIABLES
@@ -903,16 +1004,20 @@ def get_whole_dataset_and_shap_results(_bundle: Dict[str, Any]) -> Dict[str, Any
             .fillna(0.0)
             .to_numpy(dtype=float)
         )
-        num_names = [f"{ENCODING[v]}: {v}" for v in FINAL_NUMERICAL_VARIABLES]
+        num_names = [SHORT_FEATURE_LABELS[v] for v in FINAL_NUMERICAL_VARIABLES]
 
     return {
         "y_actual": y_actual,
         "y_pred": y_pred,
+        "abs_diff_mpa": abs_diff_mpa,
         "pct_diff": pct_diff,
         "r2": r2_full,
+        "rmse_mpa": rmse_mpa,
+        "mae_mpa": mae_mpa,
         "mape_pct": mape_pct,
         "rmspe_pct": rmspe_pct,
         "nrmse_pct": nrmse_pct,
+        "nmae_pct": nmae_pct,
         "shap_importance_df": imp_df,
         "shap_num": shap_num,
         "feat_num": feat_num,
@@ -997,18 +1102,18 @@ def compute_local_feature_contributions(
         "applied_load": 0.0,
     }
     feature_groups = [
-        ("X3: Cement Content", ["cement"]),
-        ("X6: Mixing Water", ["water"]),
-        ("X4 & X5: Coarse & Fine Aggregates", ["coarse_agg", "sand"]),
-        ("X8 & X9: Silica Fume & Fly Ash", ["silica_fumes", "fly_ash"]),
+        ("X3: Cement", ["cement"]),
+        ("X6: Water", ["water"]),
+        ("X4 & X5: Aggregates", ["coarse_agg", "sand"]),
+        ("X8 & X9: Silica & Fly Ash", ["silica_fumes", "fly_ash"]),
         ("X7: Superplasticizer", ["sp"]),
-        ("X2: Cube Temperature", ["temp_cube"]),
-        ("X13 & X17: Fiber Reinforcement", ["fiber_type", "fiber_dosage"]),
-        ("X1, X14 & X18: Bacteria Agent & Cells", ["bacteria_type", "bacteria_dosage", "bacteria_cells"]),
-        ("X15 & X19: Delivery Carrier", ["delivery_type", "delivery_dosage"]),
-        ("X16 & X20: Chemical Nutrient", ["nutrient_type", "nutrient_dosage"]),
-        ("X10 & X21: Curing Environment & Days", ["curing_env", "curing_days"]),
-        ("X11 & X12: Healing Period & Load", ["healing_days", "applied_load"]),
+        ("X2: Cube Temp", ["temp_cube"]),
+        ("X13 & X17: Fibers", ["fiber_type", "fiber_dosage"]),
+        ("X1, X14 & X18: Bacteria", ["bacteria_type", "bacteria_dosage", "bacteria_cells"]),
+        ("X15 & X19: Carrier", ["delivery_type", "delivery_dosage"]),
+        ("X16 & X20: Nutrient", ["nutrient_type", "nutrient_dosage"]),
+        ("X10 & X21: Curing", ["curing_env", "curing_days"]),
+        ("X11 & X12: Healing & Load", ["healing_days", "applied_load"]),
     ]
 
     rows = []
@@ -1097,13 +1202,13 @@ st.markdown(
         <div>
             <h1 class="app-hero-title">AI-Based Prediction of Self-Healing Concrete Compressive Strength</h1>
             <p class="app-hero-subtitle">
-                Optuna-Tuned Machine Learning Engine (100% Whole-Dataset + 5-Fold OOF CV Architecture) &bull;
+                Optuna-Tuned Machine Learning Engine (100% Whole-Dataset Trained v29** Architecture) &bull;
                 Verified Range: 9.06 &ndash; 115.13 MPa (N = 866)
             </p>
         </div>
         <div class="status-pill">
             <span class="status-dot"></span>
-            <span>TELEMETRY READY &bull; % ERROR NORMALIZED</span>
+            <span>TELEMETRY READY &bull; TOUCH-SAFE UI</span>
         </div>
     </div>
     """,
@@ -1314,29 +1419,36 @@ with col_right:
                     go.Indicator(
                         mode="gauge+number",
                         value=pred_val,
-                        number={"suffix": " MPa", "font": {"size": 24, "color": "#0F172A", "family": "Fira Code"}},
+                        number={"suffix": " MPa", "font": {"size": 22, "color": "#0F172A", "family": "Fira Code"}},
                         gauge={
-                            "axis": {"range": [0, 120], "tickwidth": 1, "tickcolor": "#64748B"},
+                            "axis": {
+                                "range": [0, 120],
+                                "tickwidth": 1,
+                                "tickcolor": "#1E293B",
+                                "tickfont": {"color": "#0F172A", "size": 11, "family": "Fira Code"},
+                            },
                             "bar": {"color": "#0284C7"},
                             "bgcolor": "#FFFFFF",
                             "borderwidth": 1,
                             "bordercolor": "#CBD5E1",
                             "steps": [
-                                {"range": [0, 25], "color": "rgba(245, 158, 11, 0.14)"},
-                                {"range": [25, 45], "color": "rgba(22, 163, 74, 0.14)"},
-                                {"range": [45, 65], "color": "rgba(2, 132, 199, 0.16)"},
-                                {"range": [65, 120], "color": "rgba(37, 99, 235, 0.18)"},
+                                {"range": [0, 25], "color": "rgba(245, 158, 11, 0.16)"},
+                                {"range": [25, 45], "color": "rgba(22, 163, 74, 0.16)"},
+                                {"range": [45, 65], "color": "rgba(2, 132, 199, 0.18)"},
+                                {"range": [65, 120], "color": "rgba(37, 99, 235, 0.20)"},
                             ],
                         },
                     )
                 )
                 fig_gauge.update_layout(
-                    height=195,
-                    margin=dict(l=20, r=20, t=18, b=10),
-                    paper_bgcolor="rgba(0,0,0,0)",
+                    template="plotly_white",
+                    dragmode=False,
+                    height=185,
+                    margin=dict(l=18, r=18, t=20, b=10),
+                    paper_bgcolor="#FFFFFF",
                     font={"color": "#0F172A", "family": "Fira Sans"},
                 )
-                st.plotly_chart(fig_gauge, use_container_width=True)
+                st.plotly_chart(fig_gauge, use_container_width=True, config=LOCKED_PLOT_CONFIG)
 
             render_sub_heading("Mix Physical Ratios", "Real-Time")
             st.markdown(
@@ -1369,17 +1481,17 @@ with col_right:
 
 
 # =============================================================================
-# 7. STEP 2 & STEP 4: SUGGESTED MIX + WHOLE-DATASET R² PARITY & SHAP PLOTS (%)
+# 7. STEP 2 & STEP 4: SUGGESTED MIX + WHOLE-DATASET R² PARITY & SHAP PLOTS
 # =============================================================================
 
 if bundle is not None:
     st.write("")
-    render_main_heading("STEP 04 & 02", "Model Interpretability, Validation (% Error) & Mix Optimization")
+    render_main_heading("STEP 04 & 02", "Model Interpretability, Validation & Mix Optimization")
 
     tab_r2_shap, tab_local, tab_suggest = st.tabs(
         [
-            "Step 4A: Whole-Dataset R² Parity Plot (% Error) & SHAP Plots (N=866)",
-            "Step 4B: Current Mix Local Sensitivity (% Impact Waterfall)",
+            "Step 4A: Whole-Dataset R² Parity & SHAP Plots (N=866)",
+            "Step 4B: Current Mix Local Sensitivity Waterfall",
             "Step 2: Suggested Mix Proportion Comparison",
         ]
     )
@@ -1389,33 +1501,42 @@ if bundle is not None:
         y_act = full_results["y_actual"]
         y_prd = full_results["y_pred"]
         pct_diff = full_results["pct_diff"]
+        abs_diff_mpa = full_results["abs_diff_mpa"]
         r2_f = full_results["r2"]
+        rmse_mpa = full_results["rmse_mpa"]
+        mae_mpa = full_results["mae_mpa"]
         mape_pct = full_results["mape_pct"]
         rmspe_pct = full_results["rmspe_pct"]
         nrmse_pct = full_results["nrmse_pct"]
+        nmae_pct = full_results["nmae_pct"]
         imp_df = full_results["shap_importance_df"]
         shap_num = full_results["shap_num"]
         feat_num = full_results["feat_num"]
         num_names = full_results["num_names"]
 
+        # Metric Badges showing Percentage (%) prominently + MPa reference underneath
         st.markdown(
             f"""
             <div class="metric-row">
                 <div class="metric-badge">
                     <div class="metric-badge-label">Whole-Dataset R² (N={len(y_act)})</div>
                     <div class="metric-badge-val">{r2_f:.4f}</div>
+                    <div class="metric-badge-sub">Explained: {r2_f * 100:.2f}%</div>
                 </div>
                 <div class="metric-badge">
                     <div class="metric-badge-label">Mean Abs. % Error (MAPE)</div>
                     <div class="metric-badge-val">{mape_pct:.2f}%</div>
-                </div>
-                <div class="metric-badge">
-                    <div class="metric-badge-label">RMS % Error (RMSPE)</div>
-                    <div class="metric-badge-val">{rmspe_pct:.2f}%</div>
+                    <div class="metric-badge-sub">MAE = {mae_mpa:.2f} MPa</div>
                 </div>
                 <div class="metric-badge">
                     <div class="metric-badge-label">Normalized RMSE (NRMSE)</div>
                     <div class="metric-badge-val">{nrmse_pct:.2f}%</div>
+                    <div class="metric-badge-sub">RMSE = {rmse_mpa:.2f} MPa</div>
+                </div>
+                <div class="metric-badge">
+                    <div class="metric-badge-label">RMS % Error (RMSPE)</div>
+                    <div class="metric-badge-val">{rmspe_pct:.2f}%</div>
+                    <div class="metric-badge-sub">NMAE = {nmae_pct:.2f}%</div>
                 </div>
             </div>
             """,
@@ -1426,8 +1547,8 @@ if bundle is not None:
 
         with plot_col1:
             render_sub_heading(
-                "1. Whole-Dataset R² Parity Plot (Colored by % Error)",
-                f"MAPE = {mape_pct:.2f}% | RMSPE = {rmspe_pct:.2f}%",
+                "1. Whole-Dataset R² Parity Plot",
+                f"MAPE = {mape_pct:.2f}% | RMSE = {rmse_mpa:.2f} MPa",
             )
             if go is not None:
                 mn_v = float(min(y_act.min(), y_prd.min()))
@@ -1441,19 +1562,30 @@ if bundle is not None:
                         x=y_act,
                         y=y_prd,
                         mode="markers",
-                        name=f"Whole Dataset Mixes (N={len(y_act)})",
+                        name=f"Dataset Mixes (N={len(y_act)})",
                         marker=dict(
                             size=8,
                             color=pct_diff,
-                            colorscale="YlGnBu",
-                            line=dict(width=0.6, color="#0F172A"),
-                            opacity=0.85,
+                            colorscale="Viridis",
+                            cmin=0,
+                            cmax=max(float(np.percentile(pct_diff, 95)), 5.0),
+                            line=dict(width=0.7, color="#0F172A"),
+                            opacity=0.88,
+                            colorbar=dict(
+                                title=dict(
+                                    text="Error %",
+                                    font=dict(color="#0F172A", size=11, family="Fira Sans"),
+                                ),
+                                tickfont=dict(color="#0F172A", size=10, family="Fira Code"),
+                                thickness=12,
+                                len=0.82,
+                            ),
                         ),
-                        customdata=np.column_stack([pct_diff]),
+                        customdata=np.column_stack([pct_diff, abs_diff_mpa]),
                         hovertemplate=(
-                            "Actual: %{x:.2f} MPa<br>"
-                            "Predicted: %{y:.2f} MPa<br>"
-                            "Percentage Error: %{customdata[0]:.2f}%<extra></extra>"
+                            "<b>Actual:</b> %{x:.2f} MPa<br>"
+                            "<b>Predicted:</b> %{y:.2f} MPa<br>"
+                            "<b>Error:</b> %{customdata[0]:.2f}% (%{customdata[1]:.2f} MPa)<extra></extra>"
                         ),
                     )
                 )
@@ -1462,8 +1594,8 @@ if bundle is not None:
                         x=[mn_v, mx_v],
                         y=[mn_v, mx_v],
                         mode="lines",
-                        name="1:1 Ideal Line",
-                        line=dict(color="#DC2626", width=2, dash="dash"),
+                        name="1:1 Ideal",
+                        line=dict(color="#DC2626", width=2.2, dash="dash"),
                     )
                 )
                 fig_r2.add_trace(
@@ -1471,36 +1603,66 @@ if bundle is not None:
                         x=x_line,
                         y=slope * x_line + intercept,
                         mode="lines",
-                        name=f"Fit Line (R² = {r2_f:.4f})",
-                        line=dict(color="#0284C7", width=2.5),
+                        name=f"Fit (R²={r2_f:.4f})",
+                        line=dict(color="#0284C7", width=2.6),
                     )
                 )
                 fig_r2.update_layout(
+                    template="plotly_white",
+                    dragmode=False,
                     xaxis=dict(
-                        title="Actual Experimental Compressive Strength (MPa)",
+                        title=dict(
+                            text="Actual Strength (MPa)",
+                            font=dict(color="#0F172A", size=12.5, family="Fira Sans"),
+                        ),
+                        tickfont=dict(color="#0F172A", size=11, family="Fira Code"),
                         gridcolor="#E2E8F0",
-                        zerolinecolor="#CBD5E1",
+                        linecolor="#94A3B8",
+                        fixedrange=True,
+                        mirror=True,
                     ),
                     yaxis=dict(
-                        title="Predicted Compressive Strength (MPa)",
+                        title=dict(
+                            text="Predicted Strength (MPa)",
+                            font=dict(color="#0F172A", size=12.5, family="Fira Sans"),
+                        ),
+                        tickfont=dict(color="#0F172A", size=11, family="Fira Code"),
                         gridcolor="#E2E8F0",
-                        zerolinecolor="#CBD5E1",
+                        linecolor="#94A3B8",
+                        fixedrange=True,
+                        mirror=True,
                     ),
                     height=460,
-                    margin=dict(l=20, r=20, t=25, b=20),
+                    margin=dict(l=52, r=20, t=48, b=50),
                     paper_bgcolor="#FFFFFF",
                     plot_bgcolor="#F8FAFC",
-                    font={"color": "#0F172A", "family": "Fira Sans"},
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    font=dict(color="#0F172A", family="Fira Sans", size=11.5),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="left",
+                        x=0.0,
+                        bgcolor="rgba(255,255,255,0.96)",
+                        bordercolor="#CBD5E1",
+                        borderwidth=1,
+                        font=dict(color="#0F172A", size=11, family="Fira Sans"),
+                    ),
+                    hoverlabel=dict(
+                        bgcolor="#FFFFFF",
+                        bordercolor="#0284C7",
+                        font=dict(color="#0F172A", size=11.5, family="Fira Sans"),
+                    ),
                 )
-                st.plotly_chart(fig_r2, use_container_width=True)
+                st.plotly_chart(fig_r2, use_container_width=True, config=LOCKED_PLOT_CONFIG)
             else:
                 st.dataframe(pd.DataFrame({"Actual_MPa": y_act, "Predicted_MPa": y_prd, "Error_Pct": pct_diff}))
 
         with plot_col2:
-            render_sub_heading("2. Whole-Dataset Global SHAP Feature Importance (%) (X1–X21)", "Relative % Impact")
+            render_sub_heading("2. Global SHAP Feature Importance (%) (X1–X21)", "Relative % Impact")
             bar_df = imp_df.sort_values("Relative_SHAP_Importance_Pct", ascending=True)
             if go is not None:
+                max_bar_pct = float(bar_df["Relative_SHAP_Importance_Pct"].max())
                 bar_colors = [
                     "#0284C7" if t == "Numerical" else "#16A34A"
                     for t in bar_df["Feature_Type"]
@@ -1508,29 +1670,55 @@ if bundle is not None:
                 fig_shap_bar = go.Figure(
                     go.Bar(
                         x=bar_df["Relative_SHAP_Importance_Pct"],
-                        y=bar_df["Display_Name"],
+                        y=bar_df["Short_Display_Name"],
                         orientation="h",
-                        marker_color=bar_colors,
-                        text=[f"{v:.2f}%" for v in bar_df["Relative_SHAP_Importance_Pct"]],
+                        marker=dict(color=bar_colors, line=dict(color="#0F172A", width=0.4)),
+                        text=[f" {v:.2f}%" for v in bar_df["Relative_SHAP_Importance_Pct"]],
                         textposition="outside",
+                        textfont=dict(color="#0F172A", size=11, family="Fira Code"),
+                        cliponaxis=False,
+                        customdata=np.column_stack([bar_df["Mean_Absolute_SHAP_MPa"]]),
+                        hovertemplate=(
+                            "<b>%{y}</b><br>"
+                            "Relative Share: %{x:.2f}%<br>"
+                            "Mean |SHAP|: %{customdata[0]:.2f} MPa<extra></extra>"
+                        ),
                     )
                 )
                 fig_shap_bar.update_layout(
+                    template="plotly_white",
+                    dragmode=False,
                     xaxis=dict(
-                        title="Relative SHAP Importance (%) Across Whole Dataset",
+                        title=dict(
+                            text="Relative SHAP Importance (%)",
+                            font=dict(color="#0F172A", size=12.5, family="Fira Sans"),
+                        ),
+                        tickfont=dict(color="#0F172A", size=11, family="Fira Code"),
+                        range=[0, max_bar_pct * 1.28],
                         gridcolor="#E2E8F0",
+                        linecolor="#94A3B8",
+                        fixedrange=True,
                     ),
                     yaxis=dict(
-                        title="Collective Input Variable (X1–X21)",
+                        title=dict(text=""),
+                        tickfont=dict(color="#0F172A", size=11, family="Fira Sans"),
                         gridcolor="#F1F5F9",
+                        linecolor="#94A3B8",
+                        fixedrange=True,
+                        automargin=True,
                     ),
                     height=460,
-                    margin=dict(l=20, r=55, t=25, b=20),
+                    margin=dict(l=10, r=45, t=20, b=50),
                     paper_bgcolor="#FFFFFF",
                     plot_bgcolor="#F8FAFC",
-                    font={"color": "#0F172A", "family": "Fira Sans"},
+                    font=dict(color="#0F172A", family="Fira Sans", size=11.5),
+                    hoverlabel=dict(
+                        bgcolor="#FFFFFF",
+                        bordercolor="#0284C7",
+                        font=dict(color="#0F172A", size=11.5, family="Fira Sans"),
+                    ),
                 )
-                st.plotly_chart(fig_shap_bar, use_container_width=True)
+                st.plotly_chart(fig_shap_bar, use_container_width=True, config=LOCKED_PLOT_CONFIG)
             else:
                 st.dataframe(bar_df, use_container_width=True)
 
@@ -1543,6 +1731,7 @@ if bundle is not None:
             fig_bee = go.Figure()
             for rank_pos, idx in enumerate(mean_num_order):
                 s_vals = shap_num_pct[:, idx]
+                s_mpa_vals = shap_num[:, idx]
                 f_vals = feat_num[:, idx]
                 f_min, f_max = float(np.min(f_vals)), float(np.max(f_vals))
                 f_norm = (f_vals - f_min) / max(f_max - f_min, 1e-12)
@@ -1557,84 +1746,128 @@ if bundle is not None:
                             size=6,
                             color=f_norm,
                             colorscale="Bluered",
-                            opacity=0.78,
+                            opacity=0.80,
                             showscale=(rank_pos == len(mean_num_order) - 1),
                             colorbar=dict(
-                                title="Feature Value<br>(Blue=Low, Red=High)",
+                                title=dict(
+                                    text="Value",
+                                    font=dict(color="#0F172A", size=11, family="Fira Sans"),
+                                ),
                                 tickvals=[0, 1],
                                 ticktext=["Low", "High"],
+                                tickfont=dict(color="#0F172A", size=10.5, family="Fira Sans"),
+                                thickness=12,
+                                len=0.82,
                             )
                             if rank_pos == len(mean_num_order) - 1
                             else None,
                         ),
-                        customdata=np.column_stack([f_vals]),
+                        customdata=np.column_stack([f_vals, s_mpa_vals]),
                         hovertemplate=(
                             f"<b>{num_names[idx]}</b><br>"
-                            "SHAP Impact: %{x:+.2f}%<br>"
-                            "Feature Value: %{customdata[0]:.3g}<extra></extra>"
+                            "SHAP Impact: %{x:+.2f}% (%{customdata[1]:+.2f} MPa)<br>"
+                            "Value: %{customdata[0]:.3g}<extra></extra>"
                         ),
                     )
                 )
-            fig_bee.add_vline(x=0.0, line_width=1.5, line_dash="dash", line_color="#64748B")
+            fig_bee.add_vline(x=0.0, line_width=1.6, line_dash="dash", line_color="#334155")
             fig_bee.update_layout(
+                template="plotly_white",
+                dragmode=False,
                 xaxis=dict(
-                    title="Normalized SHAP Impact (% of Mean Compressive Strength)",
+                    title=dict(
+                        text="Normalized SHAP Impact (% of Mean Strength)",
+                        font=dict(color="#0F172A", size=12.5, family="Fira Sans"),
+                    ),
+                    tickfont=dict(color="#0F172A", size=11, family="Fira Code"),
                     gridcolor="#E2E8F0",
+                    linecolor="#94A3B8",
+                    fixedrange=True,
+                    zeroline=False,
                 ),
                 yaxis=dict(
                     tickmode="array",
                     tickvals=list(range(len(mean_num_order))),
                     ticktext=[num_names[i] for i in mean_num_order],
-                    gridcolor="#F1F5F9",
+                    tickfont=dict(color="#0F172A", size=11, family="Fira Sans"),
+                    gridcolor="#E2E8F0",
+                    linecolor="#94A3B8",
+                    fixedrange=True,
+                    automargin=True,
                 ),
                 height=520,
-                margin=dict(l=20, r=20, t=20, b=20),
+                margin=dict(l=10, r=25, t=20, b=50),
                 paper_bgcolor="#FFFFFF",
                 plot_bgcolor="#F8FAFC",
-                font={"color": "#0F172A", "family": "Fira Sans"},
+                font=dict(color="#0F172A", family="Fira Sans", size=11.5),
+                hoverlabel=dict(
+                    bgcolor="#FFFFFF",
+                    bordercolor="#0284C7",
+                    font=dict(color="#0F172A", size=11.5, family="Fira Sans"),
+                ),
             )
-            st.plotly_chart(fig_bee, use_container_width=True)
+            st.plotly_chart(fig_bee, use_container_width=True, config=LOCKED_PLOT_CONFIG)
 
     with tab_local:
         render_sub_heading("Single-Mix Local Parameter Contribution (% Impact vs. Control Baseline)", "Local % Sensitivity")
         df_imp = compute_local_feature_contributions(bundle, current_params, pred_val)
         if go is not None:
+            min_imp = float(df_imp["Impact_Pct"].min())
+            max_imp = float(df_imp["Impact_Pct"].max())
+            span = max(abs(min_imp), abs(max_imp), 5.0) * 1.32
             colors = ["#16A34A" if v >= 0 else "#DC2626" for v in df_imp["Impact_Pct"]]
             fig_imp = go.Figure(
                 go.Bar(
                     x=df_imp["Impact_Pct"],
                     y=df_imp["Feature"],
                     orientation="h",
-                    marker_color=colors,
-                    text=[f"{v:+.2f}%" for v in df_imp["Impact_Pct"]],
+                    marker=dict(color=colors, line=dict(color="#0F172A", width=0.5)),
+                    text=[f" {v:+.2f}% ({m:+.1f} MPa) " for v, m in zip(df_imp["Impact_Pct"], df_imp["Impact_MPa"])],
                     textposition="outside",
+                    textfont=dict(color="#0F172A", size=11, family="Fira Code"),
+                    cliponaxis=False,
                 )
             )
+            fig_imp.add_vline(x=0.0, line_width=1.5, line_color="#334155")
             fig_imp.update_layout(
+                template="plotly_white",
+                dragmode=False,
                 xaxis=dict(
-                    title="Relative Strength Contribution (% Change)",
+                    title=dict(
+                        text="Relative Strength Contribution (% Change vs. Baseline)",
+                        font=dict(color="#0F172A", size=12.5, family="Fira Sans"),
+                    ),
+                    tickfont=dict(color="#0F172A", size=11, family="Fira Code"),
+                    range=[-span, span],
                     gridcolor="#E2E8F0",
+                    linecolor="#94A3B8",
+                    fixedrange=True,
                 ),
                 yaxis=dict(
-                    title="Parameter Group",
+                    title=dict(text=""),
+                    tickfont=dict(color="#0F172A", size=11, family="Fira Sans"),
                     gridcolor="#F1F5F9",
+                    linecolor="#94A3B8",
+                    fixedrange=True,
+                    automargin=True,
                 ),
-                height=420,
-                margin=dict(l=20, r=55, t=25, b=20),
+                height=440,
+                margin=dict(l=10, r=60, t=20, b=50),
                 paper_bgcolor="#FFFFFF",
                 plot_bgcolor="#F8FAFC",
-                font={"color": "#0F172A", "family": "Fira Sans"},
+                font=dict(color="#0F172A", family="Fira Sans", size=11.5),
             )
-            st.plotly_chart(fig_imp, use_container_width=True)
+            st.plotly_chart(fig_imp, use_container_width=True, config=LOCKED_PLOT_CONFIG)
         else:
-            st.dataframe(df_imp[["Feature", "Impact_Pct"]], use_container_width=True)
+            st.dataframe(df_imp[["Feature", "Impact_Pct", "Impact_MPa"]], use_container_width=True)
 
     with tab_suggest:
         sug_params, sug_pred = generate_suggested_mix(bundle, current_params)
-        gain_pct = ((sug_pred - pred_val) / max(abs(pred_val), 1e-12)) * 100.0
+        gain_mpa = sug_pred - pred_val
+        gain_pct = (gain_mpa / max(abs(pred_val), 1e-12)) * 100.0
         render_sub_heading(
             "Suggested High-Performance Bio-Concrete Mix Comparison",
-            f"Target: {sug_pred:.2f} MPa ({gain_pct:+.2f}%)",
+            f"Target: {sug_pred:.2f} MPa ({gain_pct:+.2f}% / {gain_mpa:+.2f} MPa)",
         )
         comp_df = pd.DataFrame(
             {
@@ -1684,7 +1917,7 @@ if bundle is not None:
                     f"{sug_params['nutrient_dosage']:.2f}",
                     f"{sug_params['curing_days']}",
                     f"{sug_pred:.2f} MPa",
-                    f"{gain_pct:+.2f}%",
+                    f"{gain_pct:+.2f}% ({gain_mpa:+.2f} MPa)",
                 ],
             }
         )
